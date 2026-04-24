@@ -1,0 +1,210 @@
+{
+  "theme": "Dark",
+  "archetype": "4 (Swiss & High-Contrast - Elite Trading Variant)",
+  "rationale": "Trading apps demand supreme data legibility and an elite, command-center aesthetic. We eliminate decorative fluff in favor of pure data visualization, stark contrast (Pure White against Deep Obsidian), and highly functional Profit (Neon Green) / Loss (Vivid Red) indicators.",
+  "colors": {
+    "background": {
+      "primary": "#050505",
+      "secondary": "#0F0F13",
+      "tertiary": "#16161A"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#8A8A93",
+      "disabled": "#45454B"
+    },
+    "brand": {
+      "primary": "#FFFFFF",
+      "accent": "#F5E15C"
+    },
+    "trading": {
+      "profit": "#00FF66",
+      "loss": "#FF3344",
+      "warning": "#FFB800"
+    },
+    "borders": {
+      "default": "rgba(255, 255, 255, 0.08)",
+      "focus": "rgba(255, 255, 255, 0.3)",
+      "profit": "rgba(0, 255, 102, 0.2)",
+      "loss": "rgba(255, 51, 68, 0.2)"
+    }
+  },
+  "typography": {
+    "fontFamilies": {
+      "heading": "Manrope",
+      "body": "IBM Plex Sans",
+      "mono": "JetBrains Mono"
+    },
+    "scale": {
+      "h1": { "fontSize": 48, "lineHeight": 56, "letterSpacing": -1, "fontWeight": "800" },
+      "h2": { "fontSize": 32, "lineHeight": 40, "letterSpacing": -0.5, "fontWeight": "700" },
+      "h3": { "fontSize": 24, "lineHeight": 32, "letterSpacing": -0.5, "fontWeight": "600" },
+      "h4": { "fontSize": 20, "lineHeight": 28, "letterSpacing": 0, "fontWeight": "600" },
+      "bodyLarge": { "fontSize": 18, "lineHeight": 28, "fontWeight": "400" },
+      "body": { "fontSize": 16, "lineHeight": 24, "fontWeight": "400" },
+      "bodySmall": { "fontSize": 14, "lineHeight": 20, "fontWeight": "500" },
+      "caption": { "fontSize": 12, "lineHeight": 16, "fontWeight": "600", "textTransform": "uppercase", "letterSpacing": 1.5 },
+      "metric": { "fontSize": 40, "lineHeight": 48, "fontWeight": "700", "fontFamily": "JetBrains Mono", "letterSpacing": -2 }
+    }
+  },
+  "spacing": {
+    "4": 4, "8": 8, "12": 12, "16": 16, "24": 24, "32": 32, "40": 40, "48": 48, "64": 64
+  },
+  "components": {
+    "card": {
+      "backgroundColor": "#0F0F13",
+      "borderRadius": 8,
+      "borderWidth": 1,
+      "borderColor": "rgba(255, 255, 255, 0.05)",
+      "padding": 24,
+      "shadow": "none"
+    },
+    "button": {
+      "primary": {
+        "backgroundColor": "#FFFFFF",
+        "textColor": "#050505",
+        "borderRadius": 4,
+        "paddingVertical": 16,
+        "paddingHorizontal": 24,
+        "fontWeight": "700"
+      },
+      "tradingBuy": {
+        "backgroundColor": "rgba(0, 255, 102, 0.1)",
+        "borderColor": "#00FF66",
+        "borderWidth": 1,
+        "textColor": "#00FF66"
+      },
+      "tradingSell": {
+        "backgroundColor": "rgba(255, 51, 68, 0.1)",
+        "borderColor": "#FF3344",
+        "borderWidth": 1,
+        "textColor": "#FF3344"
+      }
+    },
+    "input": {
+      "backgroundColor": "#050505",
+      "borderWidth": 1,
+      "borderColor": "rgba(255, 255, 255, 0.1)",
+      "borderRadius": 4,
+      "padding": 16,
+      "color": "#FFFFFF",
+      "placeholderColor": "#45454B"
+    },
+    "chip": {
+      "backgroundColor": "#16161A",
+      "borderRadius": 100,
+      "paddingVertical": 8,
+      "paddingHorizontal": 16,
+      "borderWidth": 1,
+      "borderColor": "rgba(255, 255, 255, 0.1)",
+      "textColor": "#FFFFFF"
+    },
+    "bottomNav": {
+      "backgroundColor": "rgba(15, 15, 19, 0.9)",
+      "blurType": "dark",
+      "borderTopWidth": 1,
+      "borderTopColor": "rgba(255, 255, 255, 0.05)",
+      "height": 80
+    }
+  },
+  "animations": {
+    "reanimated": true,
+    "splash": {
+      "type": "staggered-entrance",
+      "duration": 1200,
+      "easing": "ease-out-expo"
+    },
+    "numbers": {
+      "type": "rolling-ticker",
+      "rationale": "Use Reanimated for rolling/morphing P&L counters to simulate live high-frequency trading data."
+    },
+    "tabs": {
+      "type": "spring-shift",
+      "config": { "damping": 15, "stiffness": 150 }
+    },
+    "lists": {
+      "type": "fade-slide-up",
+      "delay": 50,
+      "stagger": true
+    }
+  },
+  "screens": {
+    "Splash": {
+      "layout": "Centered logo over abstract trading background.",
+      "instructions": "Use 'splash_bg' image from media URLs behind a dark gradient overlay (black/70 to black/30). Central logo pulses, followed by a bottom-up sweep revealing 'IndexPilot AI' using Manrope H1.",
+      "testIds": ["splash-screen-container", "splash-logo"]
+    },
+    "Auth": {
+      "layout": "Minimalist forms with high-contrast inputs.",
+      "instructions": "For Login and Registration: Use completely solid background (#050505). Headings left-aligned. Inputs should feel technical (1px border, stark). Main CTA is pure white. Add 'data-testid' to all inputs and buttons.",
+      "testIds": ["auth-email-input", "auth-password-input", "auth-submit-button", "auth-navigate-register"]
+    },
+    "PIN": {
+      "layout": "Large numeric keypad, pure functional.",
+      "instructions": "Setup and Lock screens. 4 distinct circular slots for the PIN indicator. Numeric keypad should have no borders, large typography, generously spaced. Use Haptic feedback (Impact) on every keystroke.",
+      "testIds": ["pin-input-1", "pin-input-2", "pin-input-3", "pin-input-4", "pin-keypad-1", "pin-keypad-2", "pin-keypad-3", "pin-keypad-4", "pin-keypad-5", "pin-keypad-6", "pin-keypad-7", "pin-keypad-8", "pin-keypad-9", "pin-keypad-0"]
+    },
+    "Dashboard_Home": {
+      "layout": "Control room grid adapted for mobile.",
+      "instructions": "Top section: Wallet Card and Today's P&L (massive JetBrains Mono metric). Market status indicator (OPEN - glowing green dot). Active positions list below. Implement pull-to-refresh with a custom haptic spinner.",
+      "testIds": ["dashboard-total-pnl", "dashboard-wallet-balance", "market-status-indicator", "active-positions-list", "pull-to-refresh-control"]
+    },
+    "Dashboard_Symbols": {
+      "layout": "Dense data list with sticky header filters.",
+      "instructions": "Search bar at top. Horizontal scrollable filter chips (NIFTY, BANKNIFTY, SENSEX). List items must show symbol, live price, and Auto-trade toggle. Settings gear per symbol for Qty/Target/SL.",
+      "testIds": ["symbols-search-input", "filter-chip-nifty", "filter-chip-banknifty", "filter-chip-sensex", "symbol-list-item", "auto-trade-toggle"]
+    },
+    "Dashboard_Broker": {
+      "layout": "Segmented control for sub-tabs.",
+      "instructions": "3 sub-tabs (Connection, Static IP, Request). Use glassmorphic segmented controller. Connection tab shows Dhan logo (use generic tech logo) with API key inputs.",
+      "testIds": ["broker-tab-connection", "broker-api-key-input", "broker-connect-button"]
+    },
+    "Dashboard_Journal": {
+      "layout": "Timeline view of trades.",
+      "instructions": "If empty, show 'empty_journal' image in center. If populated, show date headers with a vertical connecting line on the left. CSV export button fixed at bottom right.",
+      "testIds": ["journal-date-picker", "journal-empty-state", "journal-trade-entry", "journal-export-csv"]
+    },
+    "Dashboard_Strategies": {
+      "layout": "AI focused dark UI.",
+      "instructions": "Show AI Signal generator. Use 'ai_signal_hero' visual. Signal cards should have glowing borders based on strength. Action buttons for 'Monitor Position AI'.",
+      "testIds": ["strategy-ai-signal-card", "strategy-monitor-toggle"]
+    },
+    "Dashboard_Support_Logs": {
+      "layout": "Chat thread / Terminal view.",
+      "instructions": "Support: Standard chat thread interface. Logs: Use JetBrains Mono for a pure terminal feel. Green for info, red for errors, tiny font size (10px or 12px) for density.",
+      "testIds": ["support-ticket-input", "support-submit-ticket", "logs-terminal-view", "logs-clear-button"]
+    }
+  },
+  "media_urls": {
+    "splash_bg": {
+      "url": "https://images.unsplash.com/photo-1762279389002-7b6abd7bd6c6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMHN0b2NrJTIwbWFya2V0JTIwZGF0YSUyMGdyYXBofGVufDB8fHx8MTc3NzAzODMwMnww&ixlib=rb-4.1.0&q=85",
+      "description": "Abstract pink and green glow data lines, for splash screen background under dark overlay.",
+      "category": "hero"
+    },
+    "ai_signal_hero": {
+      "url": "https://images.pexels.com/photos/6203470/pexels-photo-6203470.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Neon blue line chart for the Strategies AI tab header.",
+      "category": "background"
+    },
+    "empty_journal": {
+      "url": "https://images.pexels.com/photos/8250806/pexels-photo-8250806.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Minimalist desk layout with notebook, for Journal empty state.",
+      "category": "empty_state"
+    },
+    "broker_logo_dhan_placeholder": {
+      "url": "https://images.pexels.com/photos/20716644/pexels-photo-20716644.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Minimalist tech logo for Broker connection screen.",
+      "category": "logo"
+    }
+  },
+  "instructions_to_main_agent": [
+    "This is a React Native Expo application. Use React Native StyleSheet or NativeWind/Tailwind depending on your stack. The design tokens provided should map directly to your theme file.",
+    "Do not use `div`, `span`, or Shadcn web components. Use `View`, `Text`, `TouchableOpacity`, `TextInput` from React Native or equivalent UI libraries.",
+    "Strictly adhere to the dark theme and Archetype 4 rules. Do not use 'SaaS Blue'. Stick to Pure White, Deep Obsidian, and Neon Green/Red for trading indicators.",
+    "Implement production-grade animations using `react-native-reanimated`. Pay special attention to rolling numbers for P&L.",
+    "All media assets must be fetched directly from the `media_urls` provided. DO NOT use placeholder text or mock image services.",
+    "Add `data-testid` to all interactive elements as defined in the screen testIds arrays.",
+    "Maintain high density on the Dashboard screens, resembling a 'control room' grid for mobile.",
+    "Use Manrope for headings, IBM Plex Sans for body, and JetBrains Mono exclusively for numerical data/metrics to give a technical terminal look."
+  ]
+}
