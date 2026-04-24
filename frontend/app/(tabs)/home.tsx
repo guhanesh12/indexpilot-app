@@ -114,7 +114,9 @@ export default function HomeTab() {
         <View style={styles.header}>
           <View>
             <Text style={{ color: colors.text.secondary, fontSize: 12, letterSpacing: 1 }}>WELCOME</Text>
-            <Heading variant="h3">{user?.name || user?.email || 'Trader'}</Heading>
+            <Heading variant="h3" numberOfLines={1}>
+              {user?.name || (user?.email ? String(user.email).split('@')[0] : 'Trader')}
+            </Heading>
           </View>
           <TouchableOpacity
             testID="logout-button"
