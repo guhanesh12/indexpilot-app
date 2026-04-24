@@ -1,0 +1,38 @@
+{
+  "summary": "Frontend-only smoke test of IndexPilot AI Expo web preview at 420x900 viewport. Splash animation, auto-redirect, Login, Register, PIN-setup (via mock), PIN-lock, all 7 tabs (Home, Symbols, Broker, Journal, AI, Support, Logs), and Broker sub-tabs (Connection / Static IP / Request) verified working. UI rendering matches spec; external Supabase API failures are gracefully handled with empty/zero states as expected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "(auth)/login.tsx",
+        "issue": "Empty-field submit (pressing 'Sign In' with no email/password) does NOT display any visible validation feedback on web. Alert.alert('Missing fields', ...) on React Native Web is expected to fall back to window.alert, but no dialog was observed during Playwright testing and no inline error is rendered. Users get no feedback for empty-form validation on web.",
+        "testID": "auth-submit-button",
+        "priority": "MEDIUM"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "All tabs", "issues": ["Bottom tab bar height 72px is fine; individual tab touch targets look ~60px wide x 44px tall which meets 44px minimum."]}
+    ],
+    "react_native_issues": [
+      {"component": "Splash/others", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\"' is emitted. Non-blocking but should be cleaned up for future RN Web versions."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Replace Alert.alert empty-form validation with inline error text (or a cross-platform toast) on login/register screens — current Alert.alert is silent on web.",
+    "UPDATE /app/memory/test_credentials.md: the documented 'reload' trick does not work when the current URL is /login (Expo Router does not re-run the root / splash redirect). Correct procedure is: set localStorage keys (access_token, refresh_token, user, optionally user_pin), then navigate to '/' (root), NOT reload. AsyncStorage v3 uses IndexedDB by default, but Storage lib on web uses the legacy localStorage-backed fallback (getLegacyStorage), so plain string keys like 'access_token' work without any '@' prefix.",
+    "Migrate 'shadow*' style props to 'boxShadow' to silence deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "storage.ts comment says 'AsyncStorage (which uses localStorage under the hood)'. Accurate only because the app uses the default export `AsyncStorage` from '@react-native-async-storage/async-storage' v3 which returns `getLegacyStorage()` (localStorage). If the project later migrates to `createAsyncStorage(dbName)`, the mock strategy and any manual IndexedDB inspection will break.",
+    "(auth)/login.tsx: Alert.prompt is web-unsupported (only iOS); on web/Android it silently no-ops so Forgot password does nothing. Consider custom modal for cross-platform."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "~95% (14 of 14 flows exercised, 1 minor validation-feedback gap)"},
+  "seed_data_creation": "None — mock auth via localStorage only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "To reach protected tabs without real Supabase credentials: (1) set localStorage {access_token, refresh_token, user, user_pin:'1234'} BEFORE navigating, (2) goto '/' (root) — NOT reload. The splash screen will auto-route to pin-lock after ~2.2s. Tap keypad testIDs pin-keypad-1..9/0/del with PIN 1234 to land on /home. All 7 tabs are clickable via text selectors (Home/Symbols/Broker/Journal/AI/Support/Logs). Broker sub-tabs: Connection, Static IP, Request. Expo Router on web keeps reloads on the same URL, so setting localStorage + reload on /login will NOT work.",
+  "rca_of_issue": "Empty-form validation on login: Alert.alert on react-native-web forwards to window.alert/confirm but Playwright's dialog listener did not receive the event in our run; regardless, UX-wise a blocking OS alert is suboptimal. Recommend inline error state via setState for a consistent cross-platform experience."
+}
