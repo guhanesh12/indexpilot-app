@@ -132,7 +132,7 @@ function StaticIPTab() {
   useEffect(() => {
     (async () => {
       try {
-        const res: any = await api.getStaticIP();
+        const res: any = await api.getMyIP();
         setInfo(res?.data || res);
       } catch {
         setInfo(null);
@@ -143,7 +143,7 @@ function StaticIPTab() {
   const purchase = async () => {
     setLoading(true);
     try {
-      const res: any = await api.createStaticIPOrder();
+      const res: any = await api.createIPOrder();
       Alert.alert('Order created', `Order ID: ${res?.orderId || 'n/a'}. Complete payment via Razorpay.`);
     } catch (e: any) {
       Alert.alert('Failed', e.message);

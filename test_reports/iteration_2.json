@@ -1,0 +1,42 @@
+{
+  "summary": "Frontend-only regression at 420x900 mobile viewport on IndexPilot AI Expo web preview. CRITICAL LOGIN with real credentials (guhanesh1234@gmail.com / Ranji@9600) against Supabase native auth endpoint SUCCEEDED and navigated to /pin-setup. PIN setup flow (enter 1234, confirm 1234) navigated to /home. All 7 bottom tabs (Home, Symbols, Broker, Journal, AI, Support, Logs) rendered without crashing. Registration form rewritten to match user's website spec — all 8 fields/controls present with correct icons (person, mail, call, business, location, lock) and all 7 validation rules fire correctly with inline errors. State-picker bottom-sheet modal opens and 'Tamil Nadu' selection closes modal + populates selector. External Supabase edge-function API calls are CORS-blocked from the preview origin (expected per main-agent context); UI gracefully handles failures with empty states everywhere.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Registration → Send OTP → verify-otp navigation",
+        "issue": "api.sendOtp() call to https://api.indexpilotai.com/functions/v1/make-server-c4d79cb7/send-otp is blocked by CORS in the Emergent preview origin (Access-Control-Allow-Origin missing). Because the code awaits sendOtp before router.push to /(auth)/verify-otp, a valid completed registration form shows 'Failed to fetch' in the inline err box and never navigates. Cannot validate the 6-digit OTP screen / 60s resend timer from the preview environment. Likely production works (correct origin whitelisted on Supabase), but should be verified on the actual user domain.",
+        "affected_testIDs": ["register-submit-button"]
+      },
+      {
+        "flow": "All protected-screen data fetches (wallet, live-positions, symbols, journal, api-credentials, support/tickets, logs)",
+        "issue": "Every edge-function call is CORS-rejected from https://flutter-demo-3.preview.emergentagent.com. UI correctly renders empty/zero states without crashing — so the task-level assertion holds — but zero data paths were actually exercised. Main agent / user must confirm on the real deployed domain that Supabase edge-function CORS allowlist contains the production origin.",
+        "affected_testIDs": []
+      }
+    ],
+    "design_issues": [
+      {"screen": "Home", "issues": ["Welcome header shows raw email 'guhanesh1234@gmail.com' because the Supabase auth user object has no 'name' field for this account. Consider falling back to email local-part (before @) or prompting user to set a display name."]}
+    ],
+    "react_native_issues": [
+      {"component": "Global", "issue": "Non-blocking console warnings persist: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' and 'props.pointerEvents is deprecated. Use style.pointerEvents'. Clean up when touching affected components."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "ADD CORS allowlist entry on the user's Supabase edge function (make-server-c4d79cb7) for https://flutter-demo-3.preview.emergentagent.com so the preview can exercise /send-otp, /check-email, /wallet/balance, /live-positions, /symbols/get, /get-journal-entries, /api-credentials, /support/tickets, /logs — otherwise end-to-end OTP registration and any data-fetch flow cannot be validated in the preview.",
+    "On Home welcome line, fall back to email local-part (split on '@') when user.name is empty so the header doesn't read 'WELCOME guhanesh1234@gmail.com' with an enormous email as the hero title.",
+    "(Optional housekeeping) Replace remaining shadow* props with boxShadow and props.pointerEvents with style.pointerEvents to silence RN-Web deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "(auth)/register.tsx submit(): api.sendOtp failure fully blocks navigation. If the intended UX is 'send SMS, then show OTP screen', the current strict await is correct; but because the preview origin is not CORS-whitelisted, testing this flow is impossible. Consider either (a) whitelisting preview origin on Supabase, or (b) in non-production / dev builds, bypassing the network call and still navigating for UI QA.",
+    "(tabs)/home.tsx welcome header: user object from Supabase may not have 'name' populated (bare sign-up without user_metadata.name). Add a safe fallback to prevent the entire email from rendering as the h1."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% of testable UI flows passed (10/10). Real-account login → pin-setup → pin-keypad → home → all 7 tabs → registration form + all 7 validation rules + state-picker modal all verified. Only flow NOT verifiable in preview is OTP navigation (CORS-blocked)."},
+  "seed_data_creation": "None. Used the real user credentials guhanesh1234@gmail.com / Ranji@9600 to authenticate against the actual Supabase project.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Login via Supabase native /auth/v1/token NOW WORKS (access_token returned, /pin-setup navigation happens). PIN keypad testIDs: pin-keypad-0..9 and pin-keypad-del. Registration form testIDs: register-name-input, register-email-input, register-mobile-input, register-state-select, register-city-input, register-password-input, register-agree-checkbox, register-submit-button. Validation error strings to assert against: 'Please enter your full name', 'Enter a valid email', 'Enter a valid 10-digit mobile', 'Please select your state', 'Please enter your city', 'Password must be at least 8 characters', 'Please agree to the Terms & Privacy Policy'. State modal contains header text 'Select State'. All edge-function API calls still CORS-fail from preview origin — do NOT treat this as a bug. To skip real login, mock auth via localStorage.setItem('access_token','mock'), setItem('user',JSON.stringify({...})), setItem('user_pin','1234'), then page.goto('/') NOT reload.",
+  "rca_of_issue": "Registration submit 'Failed to fetch' — RCA: user's Supabase edge function at api.indexpilotai.com does not include the Emergent preview origin in its Access-Control-Allow-Origin header. Browser blocks the preflight; fetch throws TypeError. Mitigation: add https://*.preview.emergentagent.com (or the exact subdomain) to the edge function's CORS allowlist. This single fix unblocks OTP registration, wallet/balance, live-positions, and every other data-fetch in the app."
+}

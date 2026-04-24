@@ -109,7 +109,7 @@ export default function SymbolsTab() {
 
   const addSymbolToServer = async (inst: Instrument, cfg: { qty: number; target: number; sl: number; autoTrade: boolean }) => {
     try {
-      await api.addSymbol({
+      await api.saveSymbol({
         name: inst.tradingSymbol,
         index: activeIndex,
         securityId: inst.securityId,
@@ -128,7 +128,7 @@ export default function SymbolsTab() {
 
   const deleteSymbol = async (id: string) => {
     try {
-      await api.deleteSymbol(id);
+      await api.saveSymbol({ action: 'delete', id });
       loadUserSymbols();
     } catch (e: any) {
       Alert.alert('Failed', e.message);
