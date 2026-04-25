@@ -24,6 +24,7 @@ import { useAuth } from '../../src/contexts/AuthContext';
 import AddFundsModal from '../../src/components/AddFundsModal';
 import WalletHistoryModal from '../../src/components/WalletHistoryModal';
 import LiveSignalsCard from '../../src/components/LiveSignalsCard';
+import { Storage } from '../../src/lib/storage';
 
 const INDICES = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
 const WEBSITE_URL = 'https://indexpilotai.com';
@@ -62,17 +63,39 @@ export default function HomeTab() {
   const [addFundsOpen, setAddFundsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [showTfPicker, setShowTfPicker] = useState(false);
+  const [engineIntent, setEngineIntent] = useState<{ running: boolean; interval: string; ts: number } | null>(null);
   const isOpen = marketOpen();
 
-  const engineRunning = Boolean(
-    engineState?.running ||
-    engineState?.isRunning ||
-    engineState?.state?.running ||
-    engineState?.state?.isRunning ||
-    engineState?.data?.running ||
-    engineState?.engineRunning
-  );
-  const engineInterval = engineState?.interval || engineState?.candleInterval || engineState?.state?.interval || engineState?.state?.candleInterval || engineState?.data?.interval || '15';
+  // Load saved engine intent on mount
+  useEffect(() => {
+    Storage.getEngineIntent().then((v) => v && setEngineIntent(v));
+  }, []);
+
+  // Engine running detection:
+  // Combines:
+  //  1. Explicit isRunning from server (true ⇒ running, false alone NOT enough)
+  //  2. Local intent flag set when user clicks Start/Stop (most reliable)
+  //  3. Server "primed" state (symbolsCount + recent heartbeat) when intent unknown
+  const explicitRunning = engineState?.isRunning;
+  const heartbeatAge = engineState?.lastHeartbeat ? Date.now() - Number(engineState.lastHeartbeat) : Infinity;
+  const heartbeatFresh = heartbeatAge < 30 * 60 * 1000; // 30 min window
+  const symbolsCount = Number(engineState?.symbolsCount || 0);
+  const enginePrimed = symbolsCount > 0 && engineState?.candleInterval && heartbeatFresh;
+  // Intent valid for 24 hours
+  const intentFresh = engineIntent && (Date.now() - engineIntent.ts < 24 * 60 * 60 * 1000);
+  const engineRunning = explicitRunning === true
+    ? true
+    : intentFresh
+      ? engineIntent!.running
+      : Boolean(
+          engineState?.running ||
+          engineState?.state?.running ||
+          engineState?.state?.isRunning ||
+          engineState?.data?.running ||
+          engineState?.engineRunning ||
+          enginePrimed
+        );
+  const engineInterval = engineIntent?.interval || engineState?.candleInterval || engineState?.interval || engineState?.state?.interval || engineState?.state?.candleInterval || engineState?.data?.interval || '15';
 
   // Countdown ticker
   useEffect(() => {
@@ -88,7 +111,7 @@ export default function HomeTab() {
       api.getWalletBalance(),
       api.getLivePositions(),
       api.getWalletDailyStats(),
-      api.getEngineState(),
+      api.getEngineStatus(), // GET /engine/status returns { isRunning, candleInterval, symbolsCount, ... }
       api.getFundLimits(),
     ]);
     if (w.status === 'fulfilled') {
@@ -152,6 +175,9 @@ export default function HomeTab() {
         onPress: async () => {
           try {
             await api.stopEngine();
+            // Save local intent for reliable UI state
+            await Storage.setEngineIntent(false);
+            setEngineIntent({ running: false, interval: engineInterval, ts: Date.now() });
             await loadAll();
             Alert.alert('Engine stopped', 'Auto-trading paused');
           } catch (e: any) {
@@ -162,7 +188,7 @@ export default function HomeTab() {
     ]);
   };
 
-  const startEngine = async (interval: '5' | '15' | '30' = '15') => {
+  const startEngine = async (interval: '5' | '15' = '15') => {
     setShowTfPicker(false);
     try {
       // Fetch active symbols from server
@@ -178,6 +204,10 @@ export default function HomeTab() {
         Alert.alert('Engine error', res?.error || res?.message || 'Failed to start engine');
         return;
       }
+      // Save local intent for reliable UI state
+      const intentObj = { running: true, interval, ts: Date.now() };
+      await Storage.setEngineIntent(true, interval);
+      setEngineIntent(intentObj);
       await loadAll();
       Alert.alert('🚀 Engine Started', `Auto-trading every ${interval}m candle close.\n${active.length} symbol(s) active.\n\nThis stays in sync with website — engine state is shared.`);
     } catch (e: any) {
@@ -416,7 +446,6 @@ export default function HomeTab() {
             {[
               { v: '5' as const, label: '5 Minutes', desc: 'High frequency · 75 trades/day max', color: '#FF4DD2' },
               { v: '15' as const, label: '15 Minutes', desc: 'Balanced · 25 trades/day max · ⚡ Recommended', color: '#7C5CFF' },
-              { v: '30' as const, label: '30 Minutes', desc: 'Conservative · 12 trades/day max', color: '#00B4FF' },
             ].map((tf) => (
               <TouchableOpacity
                 key={tf.v}

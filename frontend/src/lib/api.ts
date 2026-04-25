@@ -143,6 +143,7 @@ export const api = {
     request('POST', '/engine/start', { candleInterval: interval, symbols }),
   stopEngine: () => request('POST', '/engine/stop', {}),
   getEngineState: () => request('POST', '/engine/state', {}),
+  getEngineStatus: () => request('GET', '/engine/status'),
   getEngineDbStatus: () => request('GET', '/engine/db-status'),
 
   // ─── MARKET ────────────────────────────────────

@@ -59,7 +59,7 @@ function parseSignalResponse(idx: IndexName, raw: any): Signal {
 }
 
 export default function LiveSignalsCard() {
-  const [interval, setIntervalSel] = useState<'5' | '15' | '30'>('15');
+  const [interval, setIntervalSel] = useState<'5' | '15'>('15');
   const [signals, setSignals] = useState<Record<IndexName, Signal | null>>({
     NIFTY: null, BANKNIFTY: null, SENSEX: null,
   });
@@ -120,7 +120,7 @@ export default function LiveSignalsCard() {
         </View>
         {/* Timeframe pills */}
         <View style={styles.ivlRow}>
-          {(['5', '15', '30'] as const).map((v) => (
+          {(['5', '15'] as const).map((v) => (
             <TouchableOpacity
               key={v}
               onPress={() => setIntervalSel(v)}

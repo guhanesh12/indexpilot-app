@@ -67,4 +67,14 @@ export const Storage = {
     const instKeys = keys.filter((k) => k.startsWith(KEYS.INSTRUMENTS_PREFIX));
     if (instKeys.length) await AsyncStorage.multiRemove(instKeys);
   },
+  // Engine local intent flag (set by user actions). Helps UI show RUNNING
+  // between cron candle ticks where /engine/status returns isRunning:false.
+  async setEngineIntent(running: boolean, interval?: string) {
+    const v = JSON.stringify({ running, interval: interval || '15', ts: Date.now() });
+    await AsyncStorage.setItem('engine_intent', v);
+  },
+  async getEngineIntent(): Promise<{ running: boolean; interval: string; ts: number } | null> {
+    const raw = await AsyncStorage.getItem('engine_intent');
+    return raw ? JSON.parse(raw) : null;
+  },
 };
