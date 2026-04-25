@@ -74,10 +74,17 @@ export const api = {
 
   // ─── SYMBOLS ───────────────────────────────────
   getSymbols: () => request('GET', '/symbols/get'),
-  saveSymbol: (symbol: any) => request('POST', '/symbols/save', symbol),
+  saveSymbols: (symbols: any[]) => request('POST', '/symbols/save', { symbols }),
+  saveSymbol: (symbol: any) => request('POST', '/symbols/save', { symbols: [symbol] }),
   deleteSymbol: (id: string) => request('POST', '/symbols/save', { action: 'delete', id }),
   searchInstruments: (query: string, segment: string = 'NSE_FNO') =>
     request('POST', '/search-option', { query, segment }),
+  // Mobile-friendly: server-side parsed Dhan CSV
+  fetchDhanInstruments: async (force = false) => {
+    const url = `${PROXY_BASE}/api/instruments/dhan-options${force ? '?force=true' : ''}`;
+    const res = await fetch(url);
+    return res.json();
+  },
 
   // ─── ORDERS / TRADING ──────────────────────────
   executeOrder: (p: any) => request('POST', '/execute-dhan-order', p),
@@ -131,8 +138,8 @@ export const api = {
   getIPStatus: () => request('POST', '/ip-pool/provisioning-status', {}),
 
   // ─── ENGINE ────────────────────────────────────
-  startEngine: (interval: string) =>
-    request('POST', '/engine/start', { interval, candleInterval: interval }),
+  startEngine: (interval: string, symbols: any[] = []) =>
+    request('POST', '/engine/start', { candleInterval: interval, symbols }),
   stopEngine: () => request('POST', '/engine/stop', {}),
   getEngineState: () => request('POST', '/engine/state', {}),
   getEngineDbStatus: () => request('GET', '/engine/db-status'),

@@ -56,6 +56,7 @@ async def get_status_checks():
 # Forward calls to the user's Supabase stack, bypassing browser CORS.
 EDGE_BASE = "https://api.indexpilotai.com/functions/v1/make-server-c4d79cb7"
 SUPABASE_BASE = "https://oklgqelcaujxntgjyuis.supabase.co"
+DHAN_CSV_URL = "https://images.dhan.co/api-data/api-scrip-master-detailed.csv"
 ALLOWED_HEADERS = {"authorization", "apikey", "content-type"}
 
 
@@ -90,6 +91,125 @@ async def proxy_sb(path: str, request: Request):
     qs = request.url.query
     url = f"{SUPABASE_BASE}/{path}" + (f"?{qs}" if qs else "")
     return await _proxy(url, request)
+
+
+# In-memory cache for Dhan instrument CSV (~20MB) with NIFTY/BANKNIFTY/SENSEX
+# options pre-filtered. Refreshed on demand.
+_DHAN_CACHE: dict = {"data": None, "ts": 0.0}
+
+
+@api_router.get("/instruments/dhan-options")
+async def dhan_options(force: bool = False):
+    """Download + filter Dhan CSV server-side. Returns NIFTY/BANKNIFTY/SENSEX options.
+
+    Dhan CSV (api-scrip-master-detailed.csv) columns (June 2025):
+      EXCH_ID, SEGMENT, SECURITY_ID, ISIN, INSTRUMENT, UNDERLYING_SECURITY_ID,
+      UNDERLYING_SYMBOL, SYMBOL_NAME, DISPLAY_NAME, INSTRUMENT_TYPE, SERIES,
+      LOT_SIZE, SM_EXPIRY_DATE, STRIKE_PRICE, OPTION_TYPE, ...
+    """
+    import time as _t
+    now = _t.time()
+    if not force and _DHAN_CACHE["data"] and (now - _DHAN_CACHE["ts"] < 86400):
+        return _DHAN_CACHE["data"]
+    try:
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as hc:
+            r = await hc.get(DHAN_CSV_URL)
+        if r.status_code != 200:
+            return {"error": "csv_download_failed", "status": r.status_code}
+        text = r.text
+        lines = text.splitlines()
+        if not lines:
+            return {"error": "empty_csv"}
+        header = [h.strip() for h in lines[0].split(",")]
+
+        def col(*names: str) -> int:
+            for n in names:
+                if n in header:
+                    return header.index(n)
+            return -1
+
+        c_exch = col("EXCH_ID", "SEM_EXM_EXCH_ID")
+        c_inst = col("INSTRUMENT", "SEM_INSTRUMENT_NAME")
+        c_sym = col("SYMBOL_NAME", "SEM_TRADING_SYMBOL")
+        c_disp = col("DISPLAY_NAME", "SEM_CUSTOM_SYMBOL")
+        c_under = col("UNDERLYING_SYMBOL", "SEM_CUSTOM_SYMBOL")
+        c_strike = col("STRIKE_PRICE", "SEM_STRIKE_PRICE")
+        c_opt = col("OPTION_TYPE", "SEM_OPTION_TYPE")
+        c_expiry = col("SM_EXPIRY_DATE", "SEM_EXPIRY_DATE")
+        c_secid = col("SECURITY_ID", "SEM_SMST_SECURITY_ID")
+        c_lot = col("LOT_SIZE", "SEM_LOT_UNITS")
+
+        out = {"NIFTY": [], "BANKNIFTY": [], "SENSEX": []}
+        today_ts = _t.time()
+        for ln in lines[1:]:
+            parts = ln.split(",")
+            if len(parts) < len(header) - 1:
+                continue
+            try:
+                inst = parts[c_inst].strip() if c_inst >= 0 else ""
+                if inst != "OPTIDX":
+                    continue  # Index options only (OPTIDX) — skip stock options
+                under = parts[c_under].strip().upper() if c_under >= 0 else ""
+                if under not in ("NIFTY", "BANKNIFTY", "SENSEX"):
+                    continue
+                opt_type = parts[c_opt].strip().upper() if c_opt >= 0 else ""
+                if opt_type not in ("CE", "PE"):
+                    continue
+                expiry = parts[c_expiry].strip() if c_expiry >= 0 else ""
+                # Skip expired
+                if expiry:
+                    try:
+                        from datetime import datetime as _dt
+                        ex_ts = _dt.strptime(expiry, "%Y-%m-%d").timestamp()
+                        if ex_ts < today_ts - 86400:
+                            continue
+                    except Exception:
+                        pass
+                strike_raw = parts[c_strike].strip() if c_strike >= 0 else ""
+                try:
+                    strike_v = float(strike_raw or 0)
+                except Exception:
+                    continue
+                if strike_v <= 0:
+                    continue
+                secid = parts[c_secid].strip() if c_secid >= 0 else ""
+                if not secid:
+                    continue
+                sym = parts[c_sym].strip() if c_sym >= 0 else ""
+                disp = parts[c_disp].strip() if c_disp >= 0 else ""
+                lot = parts[c_lot].strip() if c_lot >= 0 else "1"
+                exch_id = parts[c_exch].strip().upper() if c_exch >= 0 else ""
+                exch = "NSE_FNO" if exch_id == "NSE" else ("BSE_FNO" if exch_id == "BSE" else (exch_id or "NSE_FNO"))
+                out[under].append({
+                    "tradingSymbol": sym,
+                    "displaySymbol": disp or sym,
+                    "securityId": secid,
+                    "strike": strike_v,
+                    "expiry": expiry,
+                    "optionType": opt_type,
+                    "lot": int(float(lot or 1)),
+                    "exchange": exch,
+                    "index": under,
+                })
+            except Exception:
+                continue
+
+        # Sort each by expiry then strike
+        for k in out:
+            out[k].sort(key=lambda x: (x["expiry"], x["strike"]))
+
+        result = {
+            "success": True,
+            "total": sum(len(v) for v in out.values()),
+            "counts": {k: len(v) for k, v in out.items()},
+            "instruments": out,
+            "fetchedAt": int(now * 1000),
+        }
+        _DHAN_CACHE["data"] = result
+        _DHAN_CACHE["ts"] = now
+        return result
+    except Exception as e:
+        return {"error": "exception", "detail": str(e)}
 
 
 app.include_router(api_router)

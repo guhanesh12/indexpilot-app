@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,335 +8,440 @@ import {
   Alert,
   ActivityIndicator,
   TextInput,
-  Modal,
-  ScrollView,
   Switch,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Card, Chip, Heading, Body, Button, Input } from '../../src/components/Primitives';
-import { colors, spacing, radius, typography } from '../../src/lib/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Body, Heading } from '../../src/components/Primitives';
+import { colors, spacing, radius } from '../../src/lib/theme';
 import { api } from '../../src/lib/api';
 import { Storage } from '../../src/lib/storage';
 
-const INDICES = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
+const INDICES = ['ALL', 'NIFTY', 'BANKNIFTY', 'SENSEX'];
+const OPT_TYPES = ['ALL', 'CE', 'PE'];
 
-type Instrument = {
-  securityId: string;
+type Inst = {
   tradingSymbol: string;
-  name?: string;
-  expiry?: string;
-  strike?: number;
-  optionType?: string;
-  exchange?: string;
-};
-
-type UserSymbol = {
-  id: string;
-  name: string;
-  index: string;
+  displaySymbol?: string;
   securityId: string;
-  exchangeSegment: string;
-  autoTrade?: boolean;
-  quantity?: number;
-  targetAmount?: number;
-  stopLossAmount?: number;
-  isActive?: boolean;
+  strike: number;
+  expiry: string;
+  optionType: string;
+  lot: number;
+  exchange: string;
+  index: string;
 };
 
 export default function SymbolsTab() {
-  const [activeIndex, setActiveIndex] = useState('NIFTY');
-  const [search, setSearch] = useState('');
   const [downloading, setDownloading] = useState(false);
-  const [instruments, setInstruments] = useState<Record<string, Instrument[]>>({});
-  const [userSymbols, setUserSymbols] = useState<UserSymbol[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [configFor, setConfigFor] = useState<Instrument | null>(null);
+  const [bundle, setBundle] = useState<{ NIFTY: Inst[]; BANKNIFTY: Inst[]; SENSEX: Inst[] } | null>(null);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<any>({});
+  const [search, setSearch] = useState('');
+  const [idx, setIdx] = useState('ALL');
+  const [opt, setOpt] = useState('ALL');
+  const [active, setActive] = useState<Inst | null>(null);
+  const [userSymbols, setUserSymbols] = useState<any[]>([]);
 
-  const loadUserSymbols = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res: any = await api.getSymbols();
-      setUserSymbols(res?.symbols || []);
-    } catch {
-      setUserSymbols([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const loadCached = useCallback(async () => {
-    const cache: Record<string, Instrument[]> = {};
-    for (const idx of INDICES) {
-      const c = await Storage.getInstruments(idx);
-      if (c?.data) cache[idx] = c.data;
-    }
-    setInstruments(cache);
-  }, []);
-
+  // Load cached
   useEffect(() => {
-    loadUserSymbols();
-    loadCached();
-  }, [loadUserSymbols, loadCached]);
+    (async () => {
+      const c = await Storage.getInstruments('dhan_bundle');
+      if (c?.data) {
+        setBundle(c.data.instruments);
+        setTotal(c.data.total);
+        setCounts(c.data.counts);
+      }
+      // Load user-saved symbols
+      try {
+        const r: any = await api.getSymbols();
+        const arr = r?.symbols || r?.data || [];
+        setUserSymbols(Array.isArray(arr) ? arr : []);
+      } catch {}
+    })();
+  }, []);
 
-  const downloadInstruments = async () => {
+  const download = async () => {
     setDownloading(true);
     try {
-      const updated: Record<string, Instrument[]> = { ...instruments };
-      for (const idx of INDICES) {
-        try {
-          const res: any = await api.searchInstruments(idx, 'NSE_FNO');
-          const list = res?.instruments || [];
-          updated[idx] = list;
-          await Storage.saveInstruments(idx, list);
-        } catch {
-          // skip
-        }
+      const r: any = await api.fetchDhanInstruments(true);
+      if (r?.success) {
+        setBundle(r.instruments);
+        setTotal(r.total);
+        setCounts(r.counts);
+        await Storage.saveInstruments('dhan_bundle', r);
+        Alert.alert(
+          'Downloaded',
+          `Total: ${r.total.toLocaleString()}\nNIFTY: ${r.counts.NIFTY}\nBANKNIFTY: ${r.counts.BANKNIFTY}\nSENSEX: ${r.counts.SENSEX}`
+        );
+      } else {
+        Alert.alert('Failed', r?.error || 'Download failed');
       }
-      setInstruments(updated);
-      Alert.alert('Downloaded', 'Instruments cached locally for offline use');
     } catch (e: any) {
-      Alert.alert('Download failed', e.message);
+      Alert.alert('Error', e.message);
     } finally {
       setDownloading(false);
     }
   };
 
-  const activeInstruments = (instruments[activeIndex] || []).filter((i) =>
-    search ? (i.tradingSymbol || '').toLowerCase().includes(search.toLowerCase()) : true
-  );
-
-  const addSymbolToServer = async (inst: Instrument, cfg: { qty: number; target: number; sl: number; autoTrade: boolean }) => {
-    try {
-      await api.saveSymbol({
-        name: inst.tradingSymbol,
-        index: activeIndex,
-        securityId: inst.securityId,
-        exchangeSegment: inst.exchange || 'NSE_FNO',
-        autoTrade: cfg.autoTrade,
-        quantity: cfg.qty,
-        targetAmount: cfg.target,
-        stopLossAmount: cfg.sl,
-      });
-      Alert.alert('Added', `${inst.tradingSymbol} saved to server`);
-      loadUserSymbols();
-    } catch (e: any) {
-      Alert.alert('Failed', e.message);
+  const filtered = useMemo(() => {
+    if (!bundle) return [];
+    let list: Inst[] = [];
+    if (idx === 'ALL') list = [...bundle.NIFTY, ...bundle.BANKNIFTY, ...bundle.SENSEX];
+    else list = (bundle as any)[idx] || [];
+    if (opt !== 'ALL') list = list.filter((i) => i.optionType === opt);
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (i) => i.tradingSymbol.toLowerCase().includes(q) || String(i.strike).includes(q)
+      );
     }
-  };
-
-  const deleteSymbol = async (id: string) => {
-    try {
-      await api.saveSymbol({ action: 'delete', id });
-      loadUserSymbols();
-    } catch (e: any) {
-      Alert.alert('Failed', e.message);
-    }
-  };
+    return list.slice(0, 80);
+  }, [bundle, idx, opt, search]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={{ padding: spacing.base }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.base }}>
-          <Heading variant="h3">Symbols</Heading>
-          <TouchableOpacity
-            testID="download-instruments-button"
-            onPress={downloadInstruments}
-            disabled={downloading}
-            style={styles.downloadBtn}
-          >
+      <View style={{ padding: spacing.base, paddingBottom: 0 }}>
+        <Heading variant="h3" style={{ marginBottom: spacing.sm }}>Instrument Selector</Heading>
+
+        {bundle ? (
+          <LinearGradient colors={['#053D2C', '#001F12']} style={styles.readyCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="checkmark-circle" size={20} color="#00FF66" />
+              <Text style={{ color: '#00FF66', fontWeight: '800', fontSize: 14 }}>
+                Instruments ready for trading
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+              <Pill bg="rgba(0,255,102,0.15)" fg="#00FF66" text={`Total: ${total.toLocaleString()}`} />
+              <Pill bg="rgba(124,92,255,0.18)" fg="#7C5CFF" text={`Filtered: ${filtered.length}`} />
+            </View>
+            <Text style={{ color: 'rgba(0,255,102,0.7)', fontSize: 11, marginTop: 8 }}>
+              ✓ Stored locally on device
+            </Text>
+          </LinearGradient>
+        ) : (
+          <View style={styles.notReadyCard}>
+            <Ionicons name="cloud-download-outline" size={32} color="#7C5CFF" />
+            <Text style={{ color: '#fff', fontWeight: '700', marginTop: 8 }}>No instruments loaded</Text>
+            <Text style={{ color: colors.text.secondary, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+              Download once per week from Dhan (~2MB, NIFTY/BANKNIFTY/SENSEX options)
+            </Text>
+          </View>
+        )}
+
+        <TouchableOpacity onPress={download} disabled={downloading} style={styles.dlBtn} testID="download-instruments-button">
+          <LinearGradient colors={['#00FFE0', '#7C5CFF']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.dlGrad}>
             {downloading ? (
-              <ActivityIndicator size="small" color="#050505" />
+              <ActivityIndicator color="#050505" />
             ) : (
               <>
-                <Ionicons name="cloud-download-outline" size={16} color="#050505" />
-                <Text style={styles.downloadText}>Download</Text>
+                <Ionicons name="cloud-download" size={18} color="#050505" />
+                <Text style={{ color: '#050505', fontWeight: '800' }}>
+                  {bundle ? 'Refresh Instruments' : 'Download Instruments'}
+                </Text>
               </>
             )}
-          </TouchableOpacity>
+          </LinearGradient>
+        </TouchableOpacity>
+
+        {/* Filters */}
+        <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.base }}>
+          <FilterDropdown label="Index" value={idx} options={INDICES} onChange={setIdx} />
+          <FilterDropdown label="Option Type" value={opt} options={OPT_TYPES} onChange={setOpt} />
         </View>
 
         <View style={styles.searchWrap}>
           <Ionicons name="search" size={16} color={colors.text.secondary} />
           <TextInput
-            testID="symbols-search-input"
-            placeholder="Search instruments..."
+            placeholder="Search by symbol or strike..."
             placeholderTextColor={colors.text.disabled}
             value={search}
             onChangeText={setSearch}
             style={styles.search}
           />
         </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: spacing.sm, marginBottom: spacing.sm }}>
-          {INDICES.map((i) => (
-            <Chip
-              key={i}
-              label={i}
-              active={activeIndex === i}
-              onPress={() => setActiveIndex(i)}
-              testID={`filter-chip-${i.toLowerCase()}`}
-            />
-          ))}
-        </ScrollView>
       </View>
 
       <FlatList
-        data={userSymbols}
-        keyExtractor={(i) => i.id}
-        contentContainerStyle={{ paddingHorizontal: spacing.base, paddingBottom: 120 }}
+        data={filtered}
+        keyExtractor={(i, k) => i.securityId + k}
+        contentContainerStyle={{ padding: spacing.base, paddingBottom: 100 }}
         ListHeaderComponent={
-          <>
-            <Text style={styles.sectionTitle}>
-              YOUR SYMBOLS ({userSymbols.length})
+          userSymbols.length ? (
+            <View style={{ marginBottom: spacing.lg }}>
+              <Text style={styles.section}>YOUR ACTIVE SYMBOLS ({userSymbols.length})</Text>
+              {userSymbols.slice(0, 5).map((s, i) => (
+                <UserSymRow key={s.id || i} sym={s} />
+              ))}
+            </View>
+          ) : null
+        }
+        ListEmptyComponent={
+          bundle ? (
+            <Text style={{ color: colors.text.secondary, textAlign: 'center', marginTop: 24 }}>
+              No matches. Try a different filter or search.
             </Text>
-            {loading ? <ActivityIndicator color={colors.text.primary} style={{ margin: spacing.lg }} /> : null}
-            {userSymbols.length === 0 && !loading ? (
-              <Card style={{ marginBottom: spacing.base }}>
-                <Body style={{ textAlign: 'center' }}>No symbols added yet. Tap a cached instrument below to add it.</Body>
-              </Card>
-            ) : null}
-          </>
+          ) : null
         }
         renderItem={({ item }) => (
-          <Card style={{ marginBottom: spacing.sm }} testID="symbol-list-item">
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 14 }}>{item.name}</Text>
-                <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 3 }}>
-                  {item.index} • Qty {item.quantity || 1} • T ₹{item.targetAmount || 0} • SL ₹{item.stopLossAmount || 0}
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View
-                  testID="auto-trade-toggle"
-                  style={[styles.badge, { backgroundColor: item.autoTrade ? 'rgba(0,255,102,0.1)' : colors.bg.tertiary }]}
-                >
-                  <Text style={{ color: item.autoTrade ? colors.trading.profit : colors.text.secondary, fontSize: 10, fontWeight: '700' }}>
-                    {item.autoTrade ? 'AUTO' : 'MANUAL'}
-                  </Text>
-                </View>
-                <TouchableOpacity testID="delete-symbol" onPress={() => deleteSymbol(item.id)}>
-                  <Ionicons name="trash-outline" size={18} color={colors.trading.loss} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Card>
+          <InstCard
+            inst={item}
+            onSaved={async () => {
+              try {
+                const r: any = await api.getSymbols();
+                setUserSymbols(r?.symbols || r?.data || []);
+              } catch {}
+            }}
+          />
         )}
-        ListFooterComponent={
-          <>
-            <Text style={[styles.sectionTitle, { marginTop: spacing.lg }]}>
-              CACHED INSTRUMENTS — {activeIndex} ({activeInstruments.length})
-            </Text>
-            {activeInstruments.length === 0 ? (
-              <Card>
-                <Body style={{ textAlign: 'center' }}>
-                  {instruments[activeIndex] ? 'No matches for your search' : 'Tap Download to cache instruments'}
-                </Body>
-              </Card>
-            ) : (
-              activeInstruments.slice(0, 40).map((inst) => (
-                <TouchableOpacity
-                  key={inst.securityId}
-                  onPress={() => setConfigFor(inst)}
-                  style={styles.instRow}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.text.primary, fontSize: 13, fontWeight: '600' }}>{inst.tradingSymbol}</Text>
-                    <Text style={{ color: colors.text.secondary, fontSize: 10, marginTop: 2 }}>
-                      {inst.optionType || ''} {inst.strike || ''} • {inst.expiry || ''}
-                    </Text>
-                  </View>
-                  <Ionicons name="add-circle-outline" size={22} color={colors.trading.profit} />
-                </TouchableOpacity>
-              ))
-            )}
-          </>
-        }
-      />
-
-      <AddSymbolModal
-        inst={configFor}
-        onClose={() => setConfigFor(null)}
-        onSave={(cfg) => {
-          if (configFor) {
-            addSymbolToServer(configFor, cfg);
-            setConfigFor(null);
-          }
-        }}
       />
     </SafeAreaView>
   );
 }
 
-function AddSymbolModal({
-  inst,
-  onClose,
-  onSave,
-}: {
-  inst: Instrument | null;
-  onClose: () => void;
-  onSave: (cfg: { qty: number; target: number; sl: number; autoTrade: boolean }) => void;
-}) {
-  const [qty, setQty] = useState('1');
-  const [target, setTarget] = useState('500');
-  const [sl, setSl] = useState('200');
-  const [autoTrade, setAutoTrade] = useState(true);
+function FilterDropdown({ label, value, options, onChange }: any) {
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={{ color: colors.text.secondary, fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 4 }}>
+        {label}
+      </Text>
+      <TouchableOpacity onPress={() => setOpen(!open)} style={styles.dd}>
+        <Text style={{ color: '#fff', fontSize: 14 }}>{value}</Text>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.text.secondary} />
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.ddMenu}>
+          {options.map((o: string) => (
+            <TouchableOpacity
+              key={o}
+              onPress={() => {
+                onChange(o);
+                setOpen(false);
+              }}
+              style={styles.ddItem}
+            >
+              <Text style={{ color: o === value ? '#00FFE0' : '#fff', fontSize: 13 }}>{o}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function Pill({ bg, fg, text }: any) {
+  return (
+    <View style={{ backgroundColor: bg, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }}>
+      <Text style={{ color: fg, fontSize: 11, fontWeight: '800' }}>{text}</Text>
+    </View>
+  );
+}
+
+function InstCard({ inst, onSaved }: { inst: Inst; onSaved: () => void }) {
+  const isCall = inst.optionType === 'CE';
+  const accent = isCall ? '#00FF66' : '#FF3344';
+  const [qty, setQty] = useState(inst.lot || 1);
+  const [target, setTarget] = useState('3000');
+  const [sl, setSl] = useState('2000');
+  const [trail, setTrail] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const apiSymbol = `${inst.index}-${formatExpiry(inst.expiry)}-${inst.strike}-${inst.optionType}`;
+
+  const lots = Math.max(1, Math.floor(qty / inst.lot));
+  const dec = () => setQty(Math.max(inst.lot, qty - inst.lot));
+  const inc = () => setQty(qty + inst.lot);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      // Get existing then append (server's /symbols/save replaces all)
+      let existing: any[] = [];
+      try {
+        const r: any = await api.getSymbols();
+        existing = r?.symbols || r?.data || [];
+      } catch {}
+      const newSym = {
+        id: `sym_${Date.now()}`,
+        name: apiSymbol,
+        index: inst.index,
+        securityId: inst.securityId,
+        exchangeSegment: inst.exchange,
+        tradingSymbol: inst.tradingSymbol,
+        optionType: inst.optionType,
+        strike: inst.strike,
+        expiry: inst.expiry,
+        quantity: qty,
+        lot: inst.lot,
+        targetAmount: parseFloat(target) || 0,
+        stopLossAmount: parseFloat(sl) || 0,
+        trailingEnabled: trail,
+        active: true,
+        autoTrade: true,
+      };
+      const merged = [...existing.filter((x: any) => x.name !== apiSymbol), newSym];
+      await api.saveSymbols(merged);
+      Alert.alert('Added', `${apiSymbol} saved to trading list`);
+      onSaved();
+    } catch (e: any) {
+      Alert.alert('Failed', e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <Modal visible={!!inst} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBg}>
-        <View style={styles.modalBody}>
-          <View style={styles.modalHandle} />
-          <Heading variant="h3" style={{ marginBottom: spacing.sm }}>
-            Add {inst?.tradingSymbol}
-          </Heading>
-          <Body style={{ marginBottom: spacing.base }}>
-            Configure auto-trade parameters
-          </Body>
-          <Input label="Quantity" keyboardType="number-pad" value={qty} onChangeText={setQty} testID="symbol-qty-input" />
-          <Input label="Target Amount (₹)" keyboardType="number-pad" value={target} onChangeText={setTarget} testID="symbol-target-input" />
-          <Input label="Stop Loss Amount (₹)" keyboardType="number-pad" value={sl} onChangeText={setSl} testID="symbol-sl-input" />
-          <View style={styles.switchRow}>
-            <Text style={{ color: colors.text.primary, fontSize: 14 }}>Auto Trade</Text>
-            <Switch
-              testID="symbol-autotrade-switch"
-              value={autoTrade}
-              onValueChange={setAutoTrade}
-              trackColor={{ true: colors.trading.profit, false: colors.border.default }}
-              thumbColor="#fff"
-            />
-          </View>
-          <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.base }}>
-            <Button title="Cancel" onPress={onClose} variant="ghost" style={{ flex: 1 }} />
-            <Button
-              testID="confirm-add-symbol"
-              title="Add Symbol"
-              onPress={() =>
-                onSave({ qty: parseInt(qty || '1', 10), target: parseFloat(target || '0'), sl: parseFloat(sl || '0'), autoTrade })
-              }
-              style={{ flex: 1 }}
-            />
-          </View>
+    <View style={[styles.instCard, { borderColor: accent + '55' }]}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15, flex: 1 }}>
+          {inst.index} {formatExpiry(inst.expiry)} {inst.strike} {isCall ? 'CALL' : 'PUT'}
+        </Text>
+        <View style={{ backgroundColor: 'rgba(124,92,255,0.18)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
+          <Text style={{ color: '#7C5CFF', fontSize: 10, fontWeight: '800' }}>{inst.index}</Text>
+        </View>
+        <View style={{ backgroundColor: accent + '22', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
+          <Text style={{ color: accent, fontSize: 10, fontWeight: '800' }}>{inst.optionType}</Text>
         </View>
       </View>
-    </Modal>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+        <View>
+          <Text style={styles.metaText}>Strike: <Text style={{ color: '#fff' }}>{inst.strike}</Text></Text>
+          <Text style={styles.metaText}>Expiry: <Text style={{ color: '#fff' }}>{inst.expiry}</Text></Text>
+          <Text style={[styles.metaText, { fontFamily: 'monospace' }]}>API: <Text style={{ color: colors.text.disabled }}>{apiSymbol}</Text></Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={{ color: colors.text.secondary, fontSize: 11 }}>Lot:</Text>
+          <Text style={{ color: '#00FF66', fontWeight: '800', fontSize: 16 }}>{inst.lot}</Text>
+        </View>
+      </View>
+
+      {/* Quantity stepper */}
+      <View style={{ marginTop: 10 }}>
+        <Text style={styles.fieldLabel}>📦 Quantity</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <TouchableOpacity onPress={dec} style={styles.qtyBtn}><Text style={{ color: '#fff', fontSize: 18 }}>−</Text></TouchableOpacity>
+          <View style={styles.qtyBox}>
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{qty}</Text>
+          </View>
+          <TouchableOpacity onPress={inc} style={[styles.qtyBtn, { borderColor: '#00FF66' }]}>
+            <Text style={{ color: '#00FF66', fontSize: 18 }}>+</Text>
+          </TouchableOpacity>
+          <Text style={{ color: colors.text.secondary, fontSize: 11 }}>({lots} lots)</Text>
+        </View>
+      </View>
+
+      {/* Target / SL */}
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.fieldLabel, { color: '#00FF66' }]}>🎯 Target (₹)</Text>
+          <TextInput keyboardType="number-pad" value={target} onChangeText={setTarget} style={[styles.inputField, { borderColor: '#00FF6655' }]} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.fieldLabel, { color: '#FF3344' }]}>🛑 Stop Loss (₹)</Text>
+          <TextInput keyboardType="number-pad" value={sl} onChangeText={setSl} style={[styles.inputField, { borderColor: '#FF334455' }]} />
+        </View>
+      </View>
+
+      {/* Trailing SL */}
+      <View style={styles.trailRow}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+          <Ionicons name="flash" size={14} color="#7C5CFF" />
+          <Text style={{ color: '#7C5CFF', fontWeight: '700', fontSize: 13 }}>Trailing Stop Loss</Text>
+        </View>
+        <Switch value={trail} onValueChange={setTrail} trackColor={{ true: '#7C5CFF', false: '#333' }} thumbColor="#fff" />
+      </View>
+
+      <TouchableOpacity onPress={save} disabled={saving} style={[styles.addBtn, { backgroundColor: accent }]}>
+        {saving ? (
+          <ActivityIndicator color="#050505" />
+        ) : (
+          <>
+            <Ionicons name="add" size={18} color="#050505" />
+            <Text style={{ color: '#050505', fontWeight: '800', fontSize: 14 }}>Add to Trading</Text>
+          </>
+        )}
+      </TouchableOpacity>
+    </View>
   );
+}
+
+function UserSymRow({ sym }: { sym: any }) {
+  const isCall = (sym.optionType || '').toUpperCase() === 'CE';
+  const color = isCall ? '#00FF66' : '#FF3344';
+  return (
+    <View style={[styles.userRow, { borderLeftColor: color }]}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{sym.name || sym.tradingSymbol}</Text>
+        <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>
+          Qty {sym.quantity} • T ₹{sym.targetAmount} • SL ₹{sym.stopLossAmount}{sym.trailingEnabled ? ' • Trail ON' : ''}
+        </Text>
+      </View>
+      <View style={{ backgroundColor: color + '22', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}>
+        <Text style={{ color, fontSize: 10, fontWeight: '800' }}>{isCall ? 'CALL' : 'PUT'}</Text>
+      </View>
+    </View>
+  );
+}
+
+function formatExpiry(d: string) {
+  // 2026-04-28 → Apr2026
+  if (!d || !d.includes('-')) return d;
+  const [y, m] = d.split('-');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[parseInt(m) - 1]}${y}`;
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg.primary },
-  downloadBtn: {
-    backgroundColor: colors.brand.primary,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+  readyCard: {
+    padding: spacing.base,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#00FF6655',
+  },
+  notReadyCard: {
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg.secondary,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    alignItems: 'center',
+  },
+  dlBtn: { marginTop: spacing.base, borderRadius: radius.sm, overflow: 'hidden' },
+  dlGrad: {
+    paddingVertical: 14,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dd: {
+    backgroundColor: colors.bg.secondary,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.4)',
     borderRadius: radius.sm,
+    paddingHorizontal: 12,
+    height: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
   },
-  downloadText: { color: '#050505', fontWeight: '700', fontSize: 13 },
+  ddMenu: {
+    position: 'absolute',
+    top: 64,
+    left: 0,
+    right: 0,
+    backgroundColor: colors.bg.tertiary,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    zIndex: 10,
+  },
+  ddItem: { padding: 10, borderBottomWidth: 1, borderBottomColor: colors.border.default },
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -345,52 +450,85 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     gap: 8,
     borderWidth: 1,
-    borderColor: colors.border.default,
+    borderColor: 'rgba(124,92,255,0.4)',
+    marginTop: spacing.sm,
   },
-  search: {
-    flex: 1,
-    color: colors.text.primary,
-    paddingVertical: 12,
-    fontSize: 14,
-  },
-  sectionTitle: {
-    ...(typography.caption as any),
+  search: { flex: 1, color: '#fff', paddingVertical: 12, fontSize: 14 },
+  section: {
     color: colors.text.secondary,
-    marginTop: spacing.base,
-    marginBottom: spacing.sm,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 8,
   },
-  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.sm },
-  instRow: {
+  instCard: {
+    backgroundColor: '#0A0820',
+    borderRadius: radius.md,
+    padding: spacing.base,
+    marginBottom: spacing.base,
+    borderWidth: 1,
+  },
+  metaText: { color: colors.text.secondary, fontSize: 11, marginVertical: 1 },
+  fieldLabel: { color: colors.text.secondary, fontSize: 11, fontWeight: '700' },
+  qtyBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyBox: {
+    flex: 1,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  inputField: {
+    backgroundColor: '#000',
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  trailRow: {
+    marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.base,
+    backgroundColor: 'rgba(124,92,255,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.25)',
+  },
+  addBtn: {
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+  },
+  userRow: {
     backgroundColor: colors.bg.secondary,
+    padding: spacing.sm + 2,
     borderRadius: radius.sm,
     marginBottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderLeftWidth: 3,
     borderWidth: 1,
     borderColor: colors.border.default,
-  },
-  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalBody: {
-    backgroundColor: colors.bg.secondary,
-    padding: spacing.lg,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingBottom: spacing.xl,
-  },
-  modalHandle: {
-    width: 48,
-    height: 4,
-    backgroundColor: colors.border.default,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: spacing.base,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.sm,
   },
 });

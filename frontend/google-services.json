@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "759806420144",
+    "project_id": "algo-app-615ae",
+    "storage_bucket": "algo-app-615ae.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:759806420144:android:4263d95dba1ac393594775",
+        "android_client_info": {
+          "package_name": "com.example.algo1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoKA-WSUG8PAnpjVpAqnqKFkGPLHtgHEg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:759806420144:android:12892ef8bae5659a594775",
+        "android_client_info": {
+          "package_name": "com.smilykart.indexpilot"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoKA-WSUG8PAnpjVpAqnqKFkGPLHtgHEg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:759806420144:android:599f92d13c32dd25594775",
+        "android_client_info": {
+          "package_name": "com.smilykart.indexpilot1"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoKA-WSUG8PAnpjVpAqnqKFkGPLHtgHEg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

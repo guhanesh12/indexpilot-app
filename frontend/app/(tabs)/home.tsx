@@ -20,6 +20,9 @@ import { Card, Heading, Body } from '../../src/components/Primitives';
 import { colors, spacing, typography, radius } from '../../src/lib/theme';
 import { api } from '../../src/lib/api';
 import { useAuth } from '../../src/contexts/AuthContext';
+import AddFundsModal from '../../src/components/AddFundsModal';
+import WalletHistoryModal from '../../src/components/WalletHistoryModal';
+import LiveSignalsCard from '../../src/components/LiveSignalsCard';
 
 const INDICES = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
 const WEBSITE_URL = 'https://indexpilotai.com';
@@ -53,7 +56,10 @@ export default function HomeTab() {
   const [positions, setPositions] = useState<any[]>([]);
   const [engineState, setEngineState] = useState<any>(null);
   const [marketQuotes, setMarketQuotes] = useState<Record<string, any>>({});
+  const [fundLimits, setFundLimits] = useState<any>(null);
   const [countdown, setCountdown] = useState(timeToNextCandle(15));
+  const [addFundsOpen, setAddFundsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const isOpen = marketOpen();
 
   const engineRunning = Boolean(
@@ -75,11 +81,12 @@ export default function HomeTab() {
   }, [engineInterval]);
 
   const loadAll = useCallback(async () => {
-    const [w, p, s, e] = await Promise.allSettled([
+    const [w, p, s, e, f] = await Promise.allSettled([
       api.getWalletBalance(),
       api.getLivePositions(),
       api.getWalletDailyStats(),
       api.getEngineState(),
+      api.getFundLimits(),
     ]);
     if (w.status === 'fulfilled') {
       const v: any = w.value;
@@ -99,22 +106,14 @@ export default function HomeTab() {
       setTotalPnl(Number(v?.totalProfit ?? v?.data?.totalProfit ?? v?.totalPnL ?? v?.totalRealizedPnL ?? 0));
     }
     if (e.status === 'fulfilled') setEngineState(e.value);
+    if (f.status === 'fulfilled') {
+      const v: any = f.value;
+      setFundLimits(v?.data || v);
+    }
   }, []);
 
-  const loadQuotes = useCallback(async () => {
-    const quotes: Record<string, any> = {};
-    await Promise.all(
-      INDICES.map(async (idx) => {
-        try {
-          const r: any = await api.getMarketQuote({ index: idx });
-          quotes[idx] = r?.quote || r?.data || r;
-        } catch {
-          /* ignore */
-        }
-      })
-    );
-    if (Object.keys(quotes).length) setMarketQuotes(quotes);
-  }, []);
+  // Skip market quotes — endpoint returns 500 currently
+  const loadQuotes = useCallback(async () => {}, []);
 
   useEffect(() => {
     loadAll();
@@ -156,6 +155,24 @@ export default function HomeTab() {
         },
       },
     ]);
+  };
+
+  const startEngine = async () => {
+    try {
+      // Fetch active symbols from server
+      const r: any = await api.getSymbols();
+      const allSyms = r?.symbols || r?.data || [];
+      const active = allSyms.filter((s: any) => s.active !== false);
+      if (!active.length) {
+        Alert.alert('No symbols', 'Add at least one trading symbol from the Symbols tab before starting the engine.');
+        return;
+      }
+      await api.startEngine('15', active);
+      await loadAll();
+      Alert.alert('Engine started', `Auto-trading every 15m candle close. ${active.length} symbol(s) active.`);
+    } catch (e: any) {
+      Alert.alert('Engine error', e.message + '\n\nTip: Make sure broker is connected first.');
+    }
   };
 
   const pulse = useSharedValue(0.4);
@@ -215,13 +232,13 @@ export default function HomeTab() {
             <View style={{ flexDirection: 'row', gap: 8, marginTop: spacing.base }}>
               <TouchableOpacity
                 testID="add-funds-button"
-                onPress={() => openWebsite('/wallet')}
+                onPress={() => setAddFundsOpen(true)}
                 style={styles.walletBtn}
               >
                 <Ionicons name="add-circle" size={16} color="#050505" />
                 <Text style={{ color: '#050505', fontWeight: '800', fontSize: 13 }}>Add Funds</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => openWebsite('/wallet')} style={styles.walletBtnGhost}>
+              <TouchableOpacity onPress={() => setHistoryOpen(true)} style={styles.walletBtnGhost}>
                 <Ionicons name="receipt-outline" size={16} color="#fff" />
                 <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>History</Text>
               </TouchableOpacity>
@@ -234,6 +251,27 @@ export default function HomeTab() {
           <PnlCard label="TODAY'S P&L" value={todayPnl} testID="dashboard-today-pnl" gradient={['#00FF66', '#00B4A0']} />
           <PnlCard label="TOTAL P&L" value={totalPnl} testID="dashboard-total-pnl" gradient={['#7C5CFF', '#5238B6']} />
         </View>
+
+        {/* Broker fund-limits card */}
+        {fundLimits && (fundLimits.availableBalance || fundLimits.utilizedAmount) ? (
+          <LinearGradient colors={['#0A0A1F', '#000']} style={styles.fundCard}>
+            <Text style={styles.fundLabel}>⚡ BROKER FUNDS (DHAN)</Text>
+            <View style={{ flexDirection: 'row', marginTop: 8 }}>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: '700' }}>AVAILABLE</Text>
+                <Text style={{ color: '#00FF66', fontSize: 16, fontWeight: '800', marginTop: 2 }}>
+                  ₹{Number(fundLimits.availableBalance || 0).toLocaleString('en-IN')}
+                </Text>
+              </View>
+              <View style={{ flex: 1, borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.06)', paddingLeft: 12 }}>
+                <Text style={{ color: colors.text.disabled, fontSize: 9, fontWeight: '700' }}>UTILIZED</Text>
+                <Text style={{ color: '#FFB800', fontSize: 16, fontWeight: '800', marginTop: 2 }}>
+                  ₹{Number(fundLimits.utilizedAmount || 0).toLocaleString('en-IN')}
+                </Text>
+              </View>
+            </View>
+          </LinearGradient>
+        ) : null}
 
         {/* Engine card */}
         <LinearGradient
@@ -252,7 +290,7 @@ export default function HomeTab() {
               <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 4 }}>
                 {engineRunning
                   ? 'Auto-trading every candle close'
-                  : 'Start engine on website to enable auto-trading'}
+                  : 'Tap ▶ to start auto-trading'}
               </Text>
             </View>
             {engineRunning ? (
@@ -261,11 +299,11 @@ export default function HomeTab() {
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                onPress={() => openWebsite('/dashboard')}
+                onPress={startEngine}
                 style={styles.startBtn}
-                testID="engine-start-redirect-button"
+                testID="engine-start-button"
               >
-                <Ionicons name="open-outline" size={20} color="#050505" />
+                <Ionicons name="play" size={22} color="#050505" />
               </TouchableOpacity>
             )}
           </View>
@@ -319,6 +357,9 @@ export default function HomeTab() {
           })}
         </View>
 
+        {/* Live AI Signals (every candle close) */}
+        <LiveSignalsCard />
+
         {/* Positions */}
         <View style={{ marginTop: spacing.lg }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm }}>
@@ -336,6 +377,22 @@ export default function HomeTab() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Modals */}
+      <AddFundsModal
+        visible={addFundsOpen}
+        onClose={() => setAddFundsOpen(false)}
+        onSuccess={loadAll}
+        user={{
+          name: user?.name,
+          email: user?.email,
+          phone: (user as any)?.phone,
+        }}
+      />
+      <WalletHistoryModal
+        visible={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -503,4 +560,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border.default,
   },
+  fundCard: {
+    marginTop: spacing.base,
+    padding: spacing.base,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(0,180,255,0.25)',
+  },
+  fundLabel: { color: '#00B4FF', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
 });

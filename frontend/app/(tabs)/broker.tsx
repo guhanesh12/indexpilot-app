@@ -50,9 +50,11 @@ function ConnectionTab() {
       try {
         const res: any = await api.getApiCredentials();
         const creds = res?.credentials || res?.data || res;
-        if (creds?.dhanClientId || res?.isConfigured) {
-          setClientId(creds?.dhanClientId || '');
-          setToken(creds?.dhanAccessToken || '');
+        const cid = creds?.dhanClientId || res?.dhanClientId;
+        const tok = creds?.dhanAccessToken || res?.dhanAccessToken;
+        if (cid || res?.isConfigured || res?.connected) {
+          setClientId(cid || '');
+          setToken(tok || '');
           setConnected(true);
           // also auto-load fund limits
           try {
