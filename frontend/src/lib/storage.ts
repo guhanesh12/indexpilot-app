@@ -77,4 +77,15 @@ export const Storage = {
     const raw = await AsyncStorage.getItem('engine_intent');
     return raw ? JSON.parse(raw) : null;
   },
+  // Save Dhan creds locally (token never leaves device beyond Supabase save)
+  async setBrokerCreds(clientId: string, accessToken: string) {
+    await AsyncStorage.setItem('broker_creds', JSON.stringify({ clientId, accessToken, ts: Date.now() }));
+  },
+  async getBrokerCreds(): Promise<{ clientId: string; accessToken: string; ts: number } | null> {
+    const raw = await AsyncStorage.getItem('broker_creds');
+    return raw ? JSON.parse(raw) : null;
+  },
+  async clearBrokerCreds() {
+    await AsyncStorage.removeItem('broker_creds');
+  },
 };

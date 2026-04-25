@@ -139,6 +139,18 @@ export default function HomeTab() {
         const funds = v?.funds || v?.data || v;
         setFundLimits(funds);
       } else {
+        // Fallback: fetch directly via Dhan API using locally saved credentials
+        // (works around user's Supabase /fund-limits 401 bug)
+        const localCreds = await Storage.getBrokerCreds();
+        if (localCreds?.clientId && localCreds?.accessToken) {
+          try {
+            const direct: any = await api.testDhanDirect(localCreds.clientId, localCreds.accessToken);
+            if (direct?.connected && direct?.funds) {
+              setFundLimits(direct.funds);
+              return;
+            }
+          } catch {}
+        }
         setFundLimits(null);
       }
     }

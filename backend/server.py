@@ -38,6 +38,67 @@ async def root():
     return {"message": "Hello World"}
 
 
+# ── Dhan direct API ──
+# Workaround: user's Supabase /test-api-connection and /fund-limits return
+# "Invalid token" even when the token is valid (verified by direct Dhan call).
+# This endpoint hits Dhan's official API directly to give a real connection test.
+@api_router.post("/dhan/test-direct")
+async def dhan_test_direct(payload: dict):
+    """Test Dhan credentials directly against Dhan's official API.
+    Body: { clientId, accessToken }
+    Returns funds + connection status."""
+    client_id = (payload or {}).get('clientId') or (payload or {}).get('dhanClientId')
+    access_token = (payload or {}).get('accessToken') or (payload or {}).get('dhanAccessToken')
+    if not client_id or not access_token:
+        return {"success": False, "connected": False, "error": "Missing clientId or accessToken"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as hc:
+            r = await hc.get(
+                'https://api.dhan.co/v2/fundlimit',
+                headers={
+                    'access-token': access_token,
+                    'client-id': str(client_id),
+                    'Content-Type': 'application/json',
+                },
+            )
+        if r.status_code == 200:
+            d = r.json()
+            return {
+                "success": True,
+                "connected": True,
+                "message": "✓ Dhan API connected (verified directly)",
+                "funds": {
+                    "availableBalance": d.get('availabelBalance', d.get('availableBalance', 0)),
+                    "sodLimit": d.get('sodLimit', 0),
+                    "utilizationAmount": d.get('utilizedAmount', 0),
+                    "utilizedAmount": d.get('utilizedAmount', 0),
+                    "collateralAmount": d.get('collateralAmount', 0),
+                    "withdrawableBalance": d.get('withdrawableBalance', 0),
+                    "blockedPayoutAmount": d.get('blockedPayoutAmount', 0),
+                    "receiveableAmount": d.get('receiveableAmount', 0),
+                },
+                "raw": d,
+            }
+        elif r.status_code == 401:
+            return {
+                "success": False, "connected": False,
+                "error": "Invalid or expired access token",
+                "detail": "Dhan rejected this token. Please regenerate from web.dhan.co",
+                "status": r.status_code,
+            }
+        else:
+            return {
+                "success": False, "connected": False,
+                "error": f"Dhan API returned HTTP {r.status_code}",
+                "detail": r.text[:300],
+                "status": r.status_code,
+            }
+    except httpx.TimeoutException:
+        return {"success": False, "connected": False, "error": "Connection timeout — Dhan API unreachable"}
+    except Exception as e:
+        return {"success": False, "connected": False, "error": str(e)}
+
+
 @api_router.post("/status", response_model=StatusCheck)
 async def create_status_check(input: StatusCheckCreate):
     status_dict = input.dict()

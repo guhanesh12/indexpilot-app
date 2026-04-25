@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Card, Heading, Body, Button, Input } from '../../src/components/Primitives';
 import { colors, spacing, radius, typography } from '../../src/lib/theme';
 import { api } from '../../src/lib/api';
+import { Storage } from '../../src/lib/storage';
 
 const SUBS = ['Connection', 'Static IP', 'Request'] as const;
 
@@ -49,6 +50,10 @@ function ConnectionTab() {
 
   const loadStatus = async () => {
     try {
+      // First check locally saved creds (so dashboard auto-shows funds via direct API)
+      const localCreds = await Storage.getBrokerCreds();
+      if (localCreds?.clientId) setClientId(localCreds.clientId);
+
       const res: any = await api.getApiCredentials();
       const creds = res?.credentials || res?.data || res;
       const cid = creds?.dhanClientId || res?.dhanClientId;
@@ -56,16 +61,25 @@ function ConnectionTab() {
       const isConfig = res?.isConfigured || res?.status?.dhanConfigured || creds?.dhanClientId;
       if (cid) setClientId(String(cid));
       if (tok && tok !== '••••••') setToken(String(tok));
+
+      // If we have local creds, do a direct Dhan test for live status
+      if (localCreds?.clientId && localCreds?.accessToken) {
+        const direct: any = await api.testDhanDirect(localCreds.clientId, localCreds.accessToken);
+        if (direct?.connected && direct?.funds) {
+          setConnected(true);
+          setStatusMsg('🟢 LIVE · Connected to Dhan');
+          setFund(direct.funds);
+          return;
+        } else {
+          setConnected(false);
+          setStatusMsg('⚠ Token expired — please reconnect');
+          await Storage.clearBrokerCreds();
+          return;
+        }
+      }
       if (isConfig) {
         setConnected(true);
-        setStatusMsg('Credentials saved');
-        try {
-          const fl: any = await api.getFundLimits();
-          const funds = fl?.funds || fl?.data || fl;
-          if (funds && (funds.availableBalance !== undefined || funds.utilizationAmount !== undefined)) {
-            setFund(funds);
-          }
-        } catch {}
+        setStatusMsg('Credentials saved (tap Update & Test to verify)');
       }
     } catch {}
   };
@@ -76,53 +90,56 @@ function ConnectionTab() {
     if (!clientId || !token) return Alert.alert('Missing', 'Enter both Client ID and Access Token');
     setLoading(true);
     try {
+      // Step 1: Save credentials to user's Supabase
       const sav: any = await api.saveApiCredentials(clientId, token);
       if (sav?.success === false) {
         Alert.alert('Save failed', sav?.message || 'Could not save credentials');
         return;
       }
-      // Test connection
-      setTesting(true);
-      const test: any = await api.testApiConnection();
-      const dhanOk = test?.status?.dhan === true || test?.connected === true;
-      const detail = test?.status?.details?.dhan || test?.message || '';
-      // Even if test fails, fund-limits may still work
-      let fundData: any = null;
-      let fundsOk = false;
-      try {
-        const fl: any = await api.getFundLimits();
-        if (fl?.success !== false && (fl?.funds || fl?.availableBalance !== undefined)) {
-          fundData = fl?.funds || fl?.data || fl;
-          fundsOk = true;
-          setFund(fundData);
-        }
-      } catch {}
 
-      if (dhanOk && fundsOk) {
+      // Step 2: VERIFY DIRECTLY WITH DHAN (bypasses user's Supabase proxy bugs)
+      setTesting(true);
+      const direct: any = await api.testDhanDirect(clientId, token);
+
+      if (direct?.connected === true && direct?.funds) {
         setConnected(true);
-        setStatusMsg('🟢 LIVE · Broker connected');
-        Alert.alert('🎉 Connected Successfully', `Dhan API verified ✓\nLive funds: ₹${fundData?.availableBalance ?? 0}\n\nApp & website are in sync.`);
-      } else if (fundsOk) {
-        setConnected(true);
-        setStatusMsg('🟢 Connected (funds reachable)');
-        Alert.alert('✅ Connected', `Broker is working — funds fetched live.\nAvailable: ₹${fundData?.availableBalance ?? 0}`);
-      } else if (dhanOk) {
-        setConnected(true);
-        setStatusMsg('🟢 Verified (funds delayed)');
-        Alert.alert('✅ Connected', 'Broker API verified. Fund data may take 1–2 min to appear.');
-      } else {
-        setConnected(false);
-        setStatusMsg('❌ Token invalid or expired');
+        setStatusMsg('🟢 LIVE · Connected to Dhan');
+        setFund(direct.funds);
+        // Save credentials locally so dashboard can fetch live funds via direct Dhan API
+        await Storage.setBrokerCreds(clientId, token);
         Alert.alert(
-          'Connection Failed',
-          `Dhan rejected this Access Token.\n\n` +
-          `Common causes:\n` +
-          `• Token expired (regenerate from web.dhan.co → API Access)\n` +
-          `• Token format incorrect (paste full JWT, no spaces)\n` +
-          `• Client ID mismatch with token's dhanClientId\n\n` +
-          `Tip: Token usually valid for 30 days from generation.`
+          '🎉 Connected Successfully',
+          `✓ Dhan API verified\n\n` +
+          `Available Balance: ₹${Number(direct.funds.availableBalance || 0).toLocaleString('en-IN')}\n` +
+          `SOD Limit: ₹${Number(direct.funds.sodLimit || 0).toLocaleString('en-IN')}\n` +
+          `Withdrawable: ₹${Number(direct.funds.withdrawableBalance || 0).toLocaleString('en-IN')}\n\n` +
+          `Credentials saved & ready for trading.`
         );
+        return;
       }
+
+      // Direct test failed → token genuinely invalid
+      setConnected(false);
+      setStatusMsg('❌ Token invalid or expired');
+      Alert.alert(
+        'Connection Failed',
+        `Dhan rejected this Access Token.\n\n` +
+        `Reason: ${direct?.error || 'Unknown error'}\n\n` +
+        `How to fix:\n` +
+        `1. Login to web.dhan.co\n` +
+        `2. Go to Profile → DhanHQ Trading APIs\n` +
+        `3. Click "Generate Access Token"\n` +
+        `4. Copy the FULL JWT (no spaces)\n` +
+        `5. Paste here & try again\n\n` +
+        `(Tokens expire every 24 hours)`
+      );
+    } catch (e: any) {
+      Alert.alert('Error', e.message);
+    } finally {
+      setLoading(false);
+      setTesting(false);
+    }
+  };
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {

@@ -123,6 +123,16 @@ export const api = {
   testApiConnection: () => request('POST', '/test-api-connection', {}),
   testConnection: () => request('POST', '/check-vps-connectivity', {}),
   getFundLimits: () => request('GET', '/fund-limits'),
+  /** Direct Dhan API test — bypasses Supabase proxy (which has bugs in the user's deployment). */
+  testDhanDirect: async (clientId: string, accessToken: string) => {
+    const url = `${PROXY_BASE}/api/dhan/test-direct`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, accessToken }),
+    });
+    return r.json();
+  },
 
   // ─── WALLET ────────────────────────────────────
   getWalletBalance: () => request('GET', '/wallet/balance'),
