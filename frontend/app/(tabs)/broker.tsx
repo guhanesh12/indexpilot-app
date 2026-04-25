@@ -49,10 +49,18 @@ function ConnectionTab() {
     (async () => {
       try {
         const res: any = await api.getApiCredentials();
-        if (res?.isConfigured) {
-          setClientId(res.credentials?.dhanClientId || '');
-          setToken(res.credentials?.dhanAccessToken || '');
+        const creds = res?.credentials || res?.data || res;
+        if (creds?.dhanClientId || res?.isConfigured) {
+          setClientId(creds?.dhanClientId || '');
+          setToken(creds?.dhanAccessToken || '');
           setConnected(true);
+          // also auto-load fund limits
+          try {
+            const fl: any = await api.getFundLimits();
+            setFund(fl?.data || fl);
+          } catch {
+            /* ignore */
+          }
         }
       } catch {
         /* ignore */
@@ -128,23 +136,36 @@ function ConnectionTab() {
 function StaticIPTab() {
   const [info, setInfo] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
+
+  const refresh = async () => {
+    setFetching(true);
+    try {
+      const res: any = await api.getMyIP();
+      setInfo(res?.data || res);
+    } catch {
+      setInfo(null);
+    } finally {
+      setFetching(false);
+    }
+  };
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await api.getMyIP();
-        setInfo(res?.data || res);
-      } catch {
-        setInfo(null);
-      }
-    })();
+    refresh();
   }, []);
+
+  const hasActiveIP = Boolean(
+    info?.address || info?.ipAddress || info?.ip ||
+    info?.status === 'active' || info?.status === 'assigned' || info?.active
+  );
+  const daysLeft = info?.daysRemaining ?? info?.days_remaining;
+  const addr = info?.address || info?.ipAddress || info?.ip || '';
 
   const purchase = async () => {
     setLoading(true);
     try {
       const res: any = await api.createIPOrder();
-      Alert.alert('Order created', `Order ID: ${res?.orderId || 'n/a'}. Complete payment via Razorpay.`);
+      Alert.alert('Order created', `Order ID: ${res?.orderId || res?.order?.id || 'n/a'}. Complete payment via Razorpay.`);
     } catch (e: any) {
       Alert.alert('Failed', e.message);
     } finally {
@@ -157,25 +178,36 @@ function StaticIPTab() {
       <Card testID="static-ip-card">
         <Text style={styles.label}>YOUR DEDICATED IP</Text>
         <Text style={{ ...(typography.metric as any), fontSize: 22, color: colors.text.primary, marginTop: 6 }}>
-          {info?.address || 'Not assigned'}
+          {fetching ? '…' : addr || 'Not assigned'}
         </Text>
-        {info?.daysRemaining ? (
-          <Text style={{ color: colors.trading.profit, fontSize: 13, marginTop: 6 }}>
-            {info.daysRemaining} days remaining
-          </Text>
+        {hasActiveIP ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.trading.profit }} />
+            <Text style={{ color: colors.trading.profit, fontSize: 13, fontWeight: '700' }}>
+              ACTIVE{daysLeft ? ` • ${daysLeft} days remaining` : ''}
+            </Text>
+          </View>
         ) : null}
       </Card>
 
-      <Card style={{ marginTop: spacing.base }}>
-        <Text style={{ color: colors.text.primary, fontSize: 16, fontWeight: '700' }}>Premium Static IP</Text>
-        <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 6 }}>
-          Whitelist a single dedicated IP with your broker for fast, reliable order execution.
-        </Text>
-        <Text style={{ color: colors.text.primary, marginTop: spacing.base, fontSize: 28, fontWeight: '800' }}>
-          ₹499<Text style={{ fontSize: 14, color: colors.text.secondary, fontWeight: '400' }}> / month</Text>
-        </Text>
-        <Button title="Purchase Static IP" onPress={purchase} loading={loading} style={{ marginTop: spacing.base }} testID="purchase-static-ip-button" />
-      </Card>
+      {!hasActiveIP && (
+        <Card style={{ marginTop: spacing.base }}>
+          <Text style={{ color: colors.text.primary, fontSize: 16, fontWeight: '700' }}>Premium Static IP</Text>
+          <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 6 }}>
+            Whitelist a dedicated IP with your broker for fast, reliable order execution.
+          </Text>
+          <Text style={{ color: colors.text.primary, marginTop: spacing.base, fontSize: 28, fontWeight: '800' }}>
+            ₹499<Text style={{ fontSize: 14, color: colors.text.secondary, fontWeight: '400' }}> / month</Text>
+          </Text>
+          <Button
+            title="Purchase Static IP"
+            onPress={purchase}
+            loading={loading}
+            style={{ marginTop: spacing.base }}
+            testID="purchase-static-ip-button"
+          />
+        </Card>
+      )}
     </View>
   );
 }

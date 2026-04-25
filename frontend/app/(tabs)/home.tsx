@@ -7,6 +7,7 @@ import {
   RefreshControl,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,17 +19,15 @@ import { colors, spacing, typography, radius } from '../../src/lib/theme';
 import { api } from '../../src/lib/api';
 import { useAuth } from '../../src/contexts/AuthContext';
 
-const INTERVALS = ['5', '15', '30', '60'];
+const INTERVALS = ['5', '15'];
 const INDICES = ['NIFTY', 'BANKNIFTY', 'SENSEX'];
 
 function marketOpen() {
   const now = new Date();
   const day = now.getDay();
   if (day === 0 || day === 6) return false;
-  const h = now.getHours();
-  const m = now.getMinutes();
-  const mins = h * 60 + m;
-  return mins >= 9 * 60 + 15 && mins <= 15 * 60 + 30;
+  const ist = (now.getUTCHours() + 5) * 60 + (now.getUTCMinutes() + 30);
+  return ist >= 9 * 60 + 15 && ist <= 15 * 60 + 30;
 }
 
 function timeToNextCandle(intervalMin: number) {
@@ -46,12 +45,15 @@ export default function HomeTab() {
   const router = useRouter();
   const { user, signOut } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  const [interval, setIntervalSel] = useState('15');
+  const [interval, setIntervalSel] = useState('5');
   const [wallet, setWallet] = useState<number | null>(null);
   const [todayPnl, setTodayPnl] = useState<number>(0);
   const [totalPnl, setTotalPnl] = useState<number>(0);
   const [positions, setPositions] = useState<any[]>([]);
-  const [countdown, setCountdown] = useState(timeToNextCandle(15));
+  const [countdown, setCountdown] = useState(timeToNextCandle(5));
+  const [engineRunning, setEngineRunning] = useState(false);
+  const [engineLoading, setEngineLoading] = useState(false);
+  const [engineInterval, setEngineInterval] = useState<string | null>(null);
   const isOpen = marketOpen();
 
   useEffect(() => {
@@ -60,23 +62,34 @@ export default function HomeTab() {
   }, [interval]);
 
   const load = useCallback(async () => {
-    try {
-      const [w, p] = await Promise.allSettled([api.getWalletBalance(), api.getLivePositions()]);
-      if (w.status === 'fulfilled') {
-        const b = (w.value as any)?.balance ?? (w.value as any)?.data?.balance ?? 0;
-        setWallet(Number(b) || 0);
-      }
-      if (p.status === 'fulfilled') {
-        const list = (p.value as any)?.positions ?? (p.value as any)?.data ?? [];
-        setPositions(Array.isArray(list) ? list : []);
-        const todays = Array.isArray(list)
-          ? list.reduce((s: number, x: any) => s + (Number(x.pnl) || 0), 0)
-          : 0;
-        setTodayPnl(todays);
-        setTotalPnl(todays);
-      }
-    } catch {
-      /* ignore; show zeros */
+    const [w, p, s, e] = await Promise.allSettled([
+      api.getWalletBalance(),
+      api.getLivePositions(),
+      api.getWalletDailyStats(),
+      api.getEngineState(),
+    ]);
+    if (w.status === 'fulfilled') {
+      const v: any = w.value;
+      const b = v?.balance ?? v?.data?.balance ?? v?.wallet?.balance ?? 0;
+      setWallet(Number(b) || 0);
+    }
+    if (p.status === 'fulfilled') {
+      const v: any = p.value;
+      const list = v?.positions ?? v?.data ?? v?.livePositions ?? [];
+      const arr = Array.isArray(list) ? list : [];
+      setPositions(arr);
+      const t = arr.reduce((sum: number, x: any) => sum + (Number(x.pnl) || 0), 0);
+      setTodayPnl(t);
+    }
+    if (s.status === 'fulfilled') {
+      const v: any = s.value;
+      setTotalPnl(Number(v?.totalProfit ?? v?.data?.totalProfit ?? v?.totalPnL ?? 0));
+    }
+    if (e.status === 'fulfilled') {
+      const v: any = e.value;
+      const running = Boolean(v?.running ?? v?.isRunning ?? v?.state === 'running' ?? v?.data?.running);
+      setEngineRunning(running);
+      setEngineInterval(v?.interval ?? v?.candleInterval ?? v?.data?.interval ?? null);
     }
   }, []);
 
@@ -90,12 +103,33 @@ export default function HomeTab() {
     setRefreshing(false);
   };
 
-  // Pulse for market indicator
+  const toggleEngine = async () => {
+    setEngineLoading(true);
+    try {
+      if (engineRunning) {
+        await api.stopEngine();
+        setEngineRunning(false);
+        Alert.alert('Engine stopped', 'Auto-trading paused');
+      } else {
+        await api.startEngine(interval);
+        setEngineRunning(true);
+        setEngineInterval(interval);
+        Alert.alert('Engine started', `AI will send signals every ${interval}m. Auto-orders will fire on BUY_CALL / BUY_PUT.`);
+      }
+    } catch (err: any) {
+      Alert.alert('Engine error', err.message);
+    } finally {
+      setEngineLoading(false);
+    }
+  };
+
   const pulse = useSharedValue(0.4);
   useEffect(() => {
     pulse.value = withRepeat(withTiming(1, { duration: 900 }), -1, true);
   }, []);
   const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  const displayName = user?.name || (user?.email ? String(user.email).split('@')[0] : 'Trader');
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -110,12 +144,11 @@ export default function HomeTab() {
         }
         contentContainerStyle={{ padding: spacing.base, paddingBottom: 32 }}
       >
-        {/* Header */}
         <View style={styles.header}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={{ color: colors.text.secondary, fontSize: 12, letterSpacing: 1 }}>WELCOME</Text>
             <Heading variant="h3" numberOfLines={1}>
-              {user?.name || (user?.email ? String(user.email).split('@')[0] : 'Trader')}
+              {displayName}
             </Heading>
           </View>
           <TouchableOpacity
@@ -139,7 +172,6 @@ export default function HomeTab() {
           </TouchableOpacity>
         </View>
 
-        {/* Wallet Card */}
         <LinearGradient
           colors={['#1A1A22', '#0F0F13']}
           start={{ x: 0, y: 0 }}
@@ -150,15 +182,29 @@ export default function HomeTab() {
             <Text style={styles.label}>WALLET BALANCE</Text>
             <View style={styles.marketInd}>
               <Animated.View
-                style={[styles.marketDot, pulseStyle, { backgroundColor: isOpen ? colors.trading.profit : colors.trading.loss }]}
+                style={[
+                  styles.marketDot,
+                  pulseStyle,
+                  { backgroundColor: isOpen ? colors.trading.profit : colors.trading.loss },
+                ]}
                 testID="market-status-indicator"
               />
-              <Text style={{ color: isOpen ? colors.trading.profit : colors.trading.loss, fontSize: 11, fontWeight: '700', letterSpacing: 1 }}>
+              <Text
+                style={{
+                  color: isOpen ? colors.trading.profit : colors.trading.loss,
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 1,
+                }}
+              >
                 {isOpen ? 'MARKET OPEN' : 'CLOSED'}
               </Text>
             </View>
           </View>
-          <Text style={[typography.metric as any, { color: colors.text.primary, marginTop: 6 }]} testID="dashboard-wallet-balance">
+          <Text
+            style={[typography.metric as any, { color: colors.text.primary, marginTop: 6 }]}
+            testID="dashboard-wallet-balance"
+          >
             ₹{(wallet ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
           </Text>
           <TouchableOpacity testID="add-funds-button" style={styles.addFundsBtn}>
@@ -167,34 +213,76 @@ export default function HomeTab() {
           </TouchableOpacity>
         </LinearGradient>
 
-        {/* PnL Row */}
         <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.base }}>
           <PnlCard label="TODAY'S P&L" value={todayPnl} testID="dashboard-today-pnl" />
           <PnlCard label="TOTAL P&L" value={totalPnl} testID="dashboard-total-pnl" />
         </View>
 
-        {/* Candle Interval */}
-        <Card style={{ marginTop: spacing.base }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm }}>
-            <Text style={styles.label}>CANDLE INTERVAL</Text>
-            <Text style={{ color: colors.trading.profit, fontSize: 13, fontWeight: '700' }} testID="next-candle-countdown">
-              Next: {countdown}
-            </Text>
+        {/* AUTO-TRADE ENGINE */}
+        <Card style={{ marginTop: spacing.base, borderColor: engineRunning ? colors.trading.profit : colors.border.default, borderWidth: 1.5 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>AUTO-TRADE ENGINE</Text>
+              <Text
+                style={{
+                  color: engineRunning ? colors.trading.profit : colors.text.secondary,
+                  fontSize: 18,
+                  fontWeight: '800',
+                  marginTop: 4,
+                }}
+                testID="engine-status-text"
+              >
+                {engineRunning ? `● RUNNING • ${engineInterval || interval}m` : '○ STOPPED'}
+              </Text>
+              <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 4 }}>
+                {engineRunning
+                  ? 'Every candle close → AI signal → auto-order to Dhan'
+                  : 'Select timeframe and start to auto-trade'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              testID="engine-toggle-button"
+              onPress={toggleEngine}
+              disabled={engineLoading}
+              style={[
+                styles.engineBtn,
+                { backgroundColor: engineRunning ? colors.trading.loss : colors.trading.profit },
+              ]}
+            >
+              {engineLoading ? (
+                <ActivityIndicator color="#050505" />
+              ) : (
+                <Ionicons name={engineRunning ? 'stop' : 'play'} size={24} color="#050505" />
+              )}
+            </TouchableOpacity>
           </View>
-          <View style={{ flexDirection: 'row' }}>
-            {INTERVALS.map((iv) => (
-              <Chip
-                key={iv}
-                label={`${iv}m`}
-                active={interval === iv}
-                onPress={() => setIntervalSel(iv)}
-                testID={`interval-chip-${iv}`}
-              />
-            ))}
+
+          <View style={{ marginTop: spacing.base }}>
+            <Text style={{ ...(styles.label as any), marginBottom: 6 }}>TIMEFRAME</Text>
+            <View style={{ flexDirection: 'row' }}>
+              {INTERVALS.map((iv) => (
+                <Chip
+                  key={iv}
+                  label={`${iv}m`}
+                  active={interval === iv}
+                  onPress={() => !engineRunning && setIntervalSel(iv)}
+                  testID={`interval-chip-${iv}`}
+                />
+              ))}
+              <View style={{ flex: 1, alignItems: 'flex-end', justifyContent: 'center' }}>
+                <Text style={{ color: colors.trading.profit, fontSize: 13, fontWeight: '700' }} testID="next-candle-countdown">
+                  Next: {countdown}
+                </Text>
+              </View>
+            </View>
+            {engineRunning ? (
+              <Text style={{ color: colors.text.disabled, fontSize: 10, marginTop: 6 }}>
+                Stop engine to change timeframe
+              </Text>
+            ) : null}
           </View>
         </Card>
 
-        {/* Indices */}
         <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.base }}>
           {INDICES.map((i) => (
             <View key={i} style={styles.indexCard}>
@@ -205,7 +293,6 @@ export default function HomeTab() {
           ))}
         </View>
 
-        {/* Positions */}
         <View style={{ marginTop: spacing.lg }}>
           <Text style={styles.sectionTitle}>ACTIVE POSITIONS</Text>
           <View testID="active-positions-list">
@@ -214,7 +301,7 @@ export default function HomeTab() {
                 <Body style={{ textAlign: 'center' }}>No active positions</Body>
               </Card>
             ) : (
-              positions.map((p, idx) => <PositionRow key={p.positionId || idx} p={p} />)
+              positions.map((p, idx) => <PositionRow key={p.positionId || p.id || idx} p={p} />)
             )}
           </View>
         </View>
@@ -250,12 +337,12 @@ function PositionRow({ p }: { p: any }) {
   return (
     <Card style={{ marginBottom: spacing.sm, padding: spacing.base }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 14 }}>
-            {p.symbol || p.tradingSymbol || 'Unknown'}
+            {p.symbol || p.tradingSymbol || p.name || 'Position'}
           </Text>
           <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>
-            Qty {p.quantity || 0} • Entry ₹{p.entryPrice || 0}
+            Qty {p.quantity || 0} • Entry ₹{p.entryPrice || p.avgPrice || 0}
           </Text>
         </View>
         <Text style={{ color: positive ? colors.trading.profit : colors.trading.loss, fontWeight: '800', fontSize: 15 }}>
@@ -313,16 +400,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border.default,
   },
-  spark: {
-    marginTop: 8,
-    height: 3,
-    backgroundColor: colors.trading.profit,
-    borderRadius: 1.5,
-    width: '70%',
-  },
-  sectionTitle: {
-    ...(typography.caption as any),
-    color: colors.text.secondary,
-    marginBottom: spacing.sm,
+  spark: { marginTop: 8, height: 3, backgroundColor: colors.trading.profit, borderRadius: 1.5, width: '70%' },
+  sectionTitle: { ...(typography.caption as any), color: colors.text.secondary, marginBottom: spacing.sm },
+  engineBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
