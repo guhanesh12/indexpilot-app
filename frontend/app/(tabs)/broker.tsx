@@ -88,24 +88,40 @@ function ConnectionTab() {
       const detail = test?.status?.details?.dhan || test?.message || '';
       // Even if test fails, fund-limits may still work
       let fundData: any = null;
+      let fundsOk = false;
       try {
         const fl: any = await api.getFundLimits();
-        fundData = fl?.funds || fl?.data || fl;
-        if (fundData) setFund(fundData);
+        if (fl?.success !== false && (fl?.funds || fl?.availableBalance !== undefined)) {
+          fundData = fl?.funds || fl?.data || fl;
+          fundsOk = true;
+          setFund(fundData);
+        }
       } catch {}
 
-      if (dhanOk) {
+      if (dhanOk && fundsOk) {
         setConnected(true);
-        setStatusMsg('✓ Connected to Dhan');
-        Alert.alert('🎉 Connected', 'Broker API verified successfully' + (fundData?.availableBalance !== undefined ? `\n\nAvailable Funds: ₹${fundData.availableBalance}` : ''));
-      } else if (fundData && (fundData.availableBalance !== undefined || fundData.sodLimit !== undefined)) {
+        setStatusMsg('🟢 LIVE · Broker connected');
+        Alert.alert('🎉 Connected Successfully', `Dhan API verified ✓\nLive funds: ₹${fundData?.availableBalance ?? 0}\n\nApp & website are in sync.`);
+      } else if (fundsOk) {
         setConnected(true);
-        setStatusMsg('✓ Saved & funds reachable');
-        Alert.alert('Saved', 'Credentials saved. Fund data reachable.\n\n' + (detail ? `Note: ${detail}` : 'Live order tests may take 1-2 minutes after token refresh.'));
+        setStatusMsg('🟢 Connected (funds reachable)');
+        Alert.alert('✅ Connected', `Broker is working — funds fetched live.\nAvailable: ₹${fundData?.availableBalance ?? 0}`);
+      } else if (dhanOk) {
+        setConnected(true);
+        setStatusMsg('🟢 Verified (funds delayed)');
+        Alert.alert('✅ Connected', 'Broker API verified. Fund data may take 1–2 min to appear.');
       } else {
-        setConnected(true); // saved at least
-        setStatusMsg('⚠ Saved but test failed');
-        Alert.alert('Saved with warning', `Credentials saved, but test failed: ${detail || 'Unknown error'}\n\nThis can happen if:\n• Access token expired (regenerate from Dhan console)\n• Network issue\n• Dhan API rate limited`);
+        setConnected(false);
+        setStatusMsg('❌ Token invalid or expired');
+        Alert.alert(
+          'Connection Failed',
+          `Dhan rejected this Access Token.\n\n` +
+          `Common causes:\n` +
+          `• Token expired (regenerate from web.dhan.co → API Access)\n` +
+          `• Token format incorrect (paste full JWT, no spaces)\n` +
+          `• Client ID mismatch with token's dhanClientId\n\n` +
+          `Tip: Token usually valid for 30 days from generation.`
+        );
       }
     } catch (e: any) {
       Alert.alert('Error', e.message);

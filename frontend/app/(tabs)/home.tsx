@@ -64,6 +64,7 @@ export default function HomeTab() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [showTfPicker, setShowTfPicker] = useState(false);
   const [engineIntent, setEngineIntent] = useState<{ running: boolean; interval: string; ts: number } | null>(null);
+  const [latestSignals, setLatestSignals] = useState<any>(null);
   const isOpen = marketOpen();
 
   // Load saved engine intent on mount
@@ -71,31 +72,14 @@ export default function HomeTab() {
     Storage.getEngineIntent().then((v) => v && setEngineIntent(v));
   }, []);
 
-  // Engine running detection:
-  // Combines:
-  //  1. Explicit isRunning from server (true ⇒ running, false alone NOT enough)
-  //  2. Local intent flag set when user clicks Start/Stop (most reliable)
-  //  3. Server "primed" state (symbolsCount + recent heartbeat) when intent unknown
+  // Engine state — trust /engine/db-status's engine.isRunning (this is the SAME source the website uses).
+  // Local intent only used as instant feedback before the next status poll lands.
   const explicitRunning = engineState?.isRunning;
-  const heartbeatAge = engineState?.lastHeartbeat ? Date.now() - Number(engineState.lastHeartbeat) : Infinity;
-  const heartbeatFresh = heartbeatAge < 30 * 60 * 1000; // 30 min window
-  const symbolsCount = Number(engineState?.symbolsCount || 0);
-  const enginePrimed = symbolsCount > 0 && engineState?.candleInterval && heartbeatFresh;
-  // Intent valid for 24 hours
-  const intentFresh = engineIntent && (Date.now() - engineIntent.ts < 24 * 60 * 60 * 1000);
-  const engineRunning = explicitRunning === true
-    ? true
-    : intentFresh
-      ? engineIntent!.running
-      : Boolean(
-          engineState?.running ||
-          engineState?.state?.running ||
-          engineState?.state?.isRunning ||
-          engineState?.data?.running ||
-          engineState?.engineRunning ||
-          enginePrimed
-        );
-  const engineInterval = engineIntent?.interval || engineState?.candleInterval || engineState?.interval || engineState?.state?.interval || engineState?.state?.candleInterval || engineState?.data?.interval || '15';
+  const intentFresh = engineIntent && (Date.now() - engineIntent.ts < 60 * 1000); // 1 min — short fallback only
+  const engineRunning = typeof explicitRunning === 'boolean'
+    ? explicitRunning
+    : (intentFresh ? engineIntent!.running : false);
+  const engineInterval = engineState?.candleInterval || engineIntent?.interval || '15';
 
   // Countdown ticker
   useEffect(() => {
@@ -111,7 +95,7 @@ export default function HomeTab() {
       api.getWalletBalance(),
       api.getLivePositions(),
       api.getWalletDailyStats(),
-      api.getEngineStatus(), // GET /engine/status returns { isRunning, candleInterval, symbolsCount, ... }
+      api.getEngineDbStatus(), // GET /engine/db-status — engine.isRunning (synced w/ website) + latestSignals
       api.getFundLimits(),
     ]);
     if (w.status === 'fulfilled') {
@@ -131,12 +115,32 @@ export default function HomeTab() {
       const v: any = s.value;
       setTotalPnl(Number(v?.totalProfit ?? v?.data?.totalProfit ?? v?.totalPnL ?? v?.totalRealizedPnL ?? 0));
     }
-    if (e.status === 'fulfilled') setEngineState(e.value);
+    if (e.status === 'fulfilled') {
+      const v: any = e.value;
+      // /engine/db-status returns: { engine: { isRunning, selectedSymbols, strategySettings: { candleInterval } }, latestSignals: { NIFTY, BANKNIFTY, SENSEX } }
+      const eng = v?.engine || v?.data?.engine || v;
+      // Normalize fields for consumer
+      setEngineState({
+        isRunning: eng?.isRunning,
+        candleInterval: eng?.strategySettings?.candleInterval || eng?.candleInterval,
+        symbolsCount: Array.isArray(eng?.selectedSymbols) ? eng.selectedSymbols.length : (eng?.symbolsCount || 0),
+        lastHeartbeat: eng?.lastHeartbeat ? new Date(eng.lastHeartbeat).getTime() : Date.now(),
+        startTime: eng?.startedAt ? new Date(eng.startedAt).getTime() : 0,
+        selectedSymbols: eng?.selectedSymbols || [],
+      });
+      // Save latestSignals (3 indices already analyzed by engine)
+      const sig = v?.latestSignals || v?.data?.latestSignals;
+      if (sig) setLatestSignals(sig);
+    }
     if (f.status === 'fulfilled') {
       const v: any = f.value;
-      // /fund-limits returns { success, funds: { availableBalance, sodLimit, ... } }
-      const funds = v?.funds || v?.data || v;
-      setFundLimits(funds);
+      // /fund-limits returns { success, funds: { availableBalance, sodLimit, ... } } when ok, or 401 error object when token expired
+      if (v?.success !== false && (v?.funds || v?.availableBalance !== undefined)) {
+        const funds = v?.funds || v?.data || v;
+        setFundLimits(funds);
+      } else {
+        setFundLimits(null);
+      }
     }
   }, []);
 
@@ -398,7 +402,7 @@ export default function HomeTab() {
         </View>
 
         {/* Live AI Signals (every candle close) */}
-        <LiveSignalsCard />
+        <LiveSignalsCard signals={latestSignals} interval={engineInterval} />
 
         {/* Positions */}
         <View style={{ marginTop: spacing.lg }}>

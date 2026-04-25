@@ -145,6 +145,7 @@ export const api = {
   getEngineState: () => request('POST', '/engine/state', {}),
   getEngineStatus: () => request('GET', '/engine/status'),
   getEngineDbStatus: () => request('GET', '/engine/db-status'),
+  getEngineSavedState: () => request('GET', '/engine/state'),
 
   // ─── MARKET ────────────────────────────────────
   getMarketQuote: (p: any) => request('POST', '/market-quote', p),
