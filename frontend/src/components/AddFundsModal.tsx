@@ -35,10 +35,11 @@ export default function AddFundsModal({ visible, onClose, onSuccess, user }: Pro
     setCreating(true);
     try {
       const r: any = await api.createRecharge(amt);
-      // Backend may return { order_id, amount, key_id } or nested
-      const orderId = r?.orderId || r?.order_id || r?.razorpayOrderId || r?.data?.orderId;
-      const keyId = r?.keyId || r?.key_id || r?.razorpayKeyId || r?.data?.keyId || 'rzp_live_SGiyfm4tpOcn21';
-      const amtPaise = (r?.amount || amt * 100);
+      // Backend returns: { success, order: { id, amount, currency, ... }, razorpayKeyId }
+      const orderObj = r?.order || r?.data?.order || r;
+      const orderId = orderObj?.id || r?.orderId || r?.order_id || r?.razorpayOrderId;
+      const keyId = r?.razorpayKeyId || r?.keyId || r?.key_id || r?.data?.razorpayKeyId || 'rzp_live_SGiyfm4tpOcn21';
+      const amtPaise = orderObj?.amount || r?.amount || amt * 100;
       if (!orderId) {
         Alert.alert('Order failed', r?.error || r?.message || 'Could not create payment order');
         setCreating(false);
@@ -47,8 +48,8 @@ export default function AddFundsModal({ visible, onClose, onSuccess, user }: Pro
       setOrder({
         orderId,
         keyId,
-        amount: typeof amtPaise === 'number' ? (amtPaise > amt ? amtPaise : amt * 100) : amt * 100,
-        currency: 'INR',
+        amount: amtPaise,
+        currency: orderObj?.currency || 'INR',
         name: 'IndexPilot AI',
         description: `Wallet Recharge ₹${amt}`,
         prefill: { name: user?.name, email: user?.email, contact: user?.phone },

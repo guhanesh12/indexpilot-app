@@ -42,51 +42,76 @@ function ConnectionTab() {
   const [clientId, setClientId] = useState('');
   const [token, setToken] = useState('');
   const [connected, setConnected] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fund, setFund] = useState<any>(null);
+  const [statusMsg, setStatusMsg] = useState<string>('');
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res: any = await api.getApiCredentials();
-        const creds = res?.credentials || res?.data || res;
-        const cid = creds?.dhanClientId || res?.dhanClientId;
-        const tok = creds?.dhanAccessToken || res?.dhanAccessToken;
-        if (cid || res?.isConfigured || res?.connected) {
-          setClientId(cid || '');
-          setToken(tok || '');
-          setConnected(true);
-          // also auto-load fund limits
-          try {
-            const fl: any = await api.getFundLimits();
-            setFund(fl?.data || fl);
-          } catch {
-            /* ignore */
+  const loadStatus = async () => {
+    try {
+      const res: any = await api.getApiCredentials();
+      const creds = res?.credentials || res?.data || res;
+      const cid = creds?.dhanClientId || res?.dhanClientId;
+      const tok = creds?.dhanAccessToken || res?.dhanAccessToken;
+      const isConfig = res?.isConfigured || res?.status?.dhanConfigured || creds?.dhanClientId;
+      if (cid) setClientId(String(cid));
+      if (tok && tok !== '••••••') setToken(String(tok));
+      if (isConfig) {
+        setConnected(true);
+        setStatusMsg('Credentials saved');
+        try {
+          const fl: any = await api.getFundLimits();
+          const funds = fl?.funds || fl?.data || fl;
+          if (funds && (funds.availableBalance !== undefined || funds.utilizationAmount !== undefined)) {
+            setFund(funds);
           }
-        }
-      } catch {
-        /* ignore */
+        } catch {}
       }
-    })();
-  }, []);
+    } catch {}
+  };
+
+  useEffect(() => { loadStatus(); }, []);
 
   const save = async () => {
     if (!clientId || !token) return Alert.alert('Missing', 'Enter both Client ID and Access Token');
     setLoading(true);
     try {
-      await api.saveApiCredentials(clientId, token);
-      const test: any = await api.testConnection();
-      if (test?.connected) {
+      const sav: any = await api.saveApiCredentials(clientId, token);
+      if (sav?.success === false) {
+        Alert.alert('Save failed', sav?.message || 'Could not save credentials');
+        return;
+      }
+      // Test connection
+      setTesting(true);
+      const test: any = await api.testApiConnection();
+      const dhanOk = test?.status?.dhan === true || test?.connected === true;
+      const detail = test?.status?.details?.dhan || test?.message || '';
+      // Even if test fails, fund-limits may still work
+      let fundData: any = null;
+      try {
+        const fl: any = await api.getFundLimits();
+        fundData = fl?.funds || fl?.data || fl;
+        if (fundData) setFund(fundData);
+      } catch {}
+
+      if (dhanOk) {
         setConnected(true);
-        setFund(test.fundLimits);
-        Alert.alert('Connected', 'Broker API linked successfully');
+        setStatusMsg('✓ Connected to Dhan');
+        Alert.alert('🎉 Connected', 'Broker API verified successfully' + (fundData?.availableBalance !== undefined ? `\n\nAvailable Funds: ₹${fundData.availableBalance}` : ''));
+      } else if (fundData && (fundData.availableBalance !== undefined || fundData.sodLimit !== undefined)) {
+        setConnected(true);
+        setStatusMsg('✓ Saved & funds reachable');
+        Alert.alert('Saved', 'Credentials saved. Fund data reachable.\n\n' + (detail ? `Note: ${detail}` : 'Live order tests may take 1-2 minutes after token refresh.'));
       } else {
-        Alert.alert('Failed', test?.message || 'Could not connect');
+        setConnected(true); // saved at least
+        setStatusMsg('⚠ Saved but test failed');
+        Alert.alert('Saved with warning', `Credentials saved, but test failed: ${detail || 'Unknown error'}\n\nThis can happen if:\n• Access token expired (regenerate from Dhan console)\n• Network issue\n• Dhan API rate limited`);
       }
     } catch (e: any) {
       Alert.alert('Error', e.message);
     } finally {
       setLoading(false);
+      setTesting(false);
     }
   };
 
@@ -97,12 +122,18 @@ function ConnectionTab() {
           <View style={[styles.brandBox, { backgroundColor: connected ? 'rgba(0,255,102,0.1)' : colors.bg.tertiary }]}>
             <Ionicons name="flash" size={20} color={connected ? colors.trading.profit : colors.text.secondary} />
           </View>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={{ color: colors.text.primary, fontWeight: '700', fontSize: 16 }}>Dhan</Text>
             <Text style={{ color: connected ? colors.trading.profit : colors.text.secondary, fontSize: 12, marginTop: 2 }}>
-              {connected ? 'Connected' : 'Not connected'}
+              {connected ? (statusMsg || 'Connected') : 'Not connected'}
             </Text>
           </View>
+          {connected ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(0,255,102,0.12)', borderRadius: 4 }}>
+              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#00FF66' }} />
+              <Text style={{ color: '#00FF66', fontSize: 10, fontWeight: '800' }}>LIVE</Text>
+            </View>
+          ) : null}
         </View>
         <Input
           label="Dhan Client ID"
@@ -119,15 +150,18 @@ function ConnectionTab() {
           testID="broker-access-token-input"
           secureTextEntry={!!token && token.length > 20}
         />
-        <Button title={connected ? 'Update & Test' : 'Connect Broker'} onPress={save} loading={loading} testID="broker-connect-button" />
+        <Button title={testing ? 'Testing connection…' : (connected ? 'Update & Test' : 'Connect Broker')} onPress={save} loading={loading} testID="broker-connect-button" />
       </Card>
 
       {fund && (
         <Card style={{ marginTop: spacing.base }}>
-          <Text style={styles.label}>FUND LIMITS</Text>
+          <Text style={styles.label}>📊 BROKER FUND LIMITS (LIVE)</Text>
           <View style={{ marginTop: spacing.sm }}>
-            <Row label="Available" value={`₹${fund.availableBalance || 0}`} />
-            <Row label="Utilized" value={`₹${fund.utilizedAmount || 0}`} />
+            <Row label="Available Balance" value={`₹${Number(fund.availableBalance || 0).toLocaleString('en-IN')}`} />
+            <Row label="SOD Limit" value={`₹${Number(fund.sodLimit || 0).toLocaleString('en-IN')}`} />
+            <Row label="Utilization" value={`₹${Number(fund.utilizationAmount || fund.utilizedAmount || 0).toLocaleString('en-IN')}`} />
+            <Row label="Collateral" value={`₹${Number(fund.collateralAmount || 0).toLocaleString('en-IN')}`} />
+            <Row label="Blocked Pay-In" value={`₹${Number(fund.blockedPayinAmount || 0).toLocaleString('en-IN')}`} />
           </View>
         </Card>
       )}

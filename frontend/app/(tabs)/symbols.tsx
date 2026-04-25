@@ -171,13 +171,45 @@ export default function SymbolsTab() {
         contentContainerStyle={{ padding: spacing.base, paddingBottom: 100 }}
         ListHeaderComponent={
           userSymbols.length ? (
-            <View style={{ marginBottom: spacing.lg }}>
-              <Text style={styles.section}>YOUR ACTIVE SYMBOLS ({userSymbols.length})</Text>
-              {userSymbols.slice(0, 5).map((s, i) => (
-                <UserSymRow key={s.id || i} sym={s} />
+            <LinearGradient colors={['#053D2C', '#001F12']} style={styles.activeBlock}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                <Ionicons name="checkmark-circle" size={16} color="#00FF66" />
+                <Text style={{ color: '#00FF66', fontWeight: '900', fontSize: 12, letterSpacing: 1 }}>
+                  ✓ YOUR ACTIVE SYMBOLS ({userSymbols.length})
+                </Text>
+              </View>
+              {userSymbols.map((s, i) => (
+                <UserSymRow
+                  key={s.id || i}
+                  sym={s}
+                  onDelete={async () => {
+                    Alert.alert('Remove symbol', `Remove ${s.symbol_name || s.name} from auto-trading?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Remove', style: 'destructive', onPress: async () => {
+                          try {
+                            const remaining = userSymbols.filter((x: any) => (x.id || x.symbol_id) !== (s.id || s.symbol_id));
+                            await api.saveSymbols(remaining);
+                            setUserSymbols(remaining);
+                          } catch (e: any) { Alert.alert('Failed', e.message); }
+                        }
+                      }
+                    ]);
+                  }}
+                />
               ))}
+              <Text style={{ color: 'rgba(0,255,102,0.6)', fontSize: 10, textAlign: 'center', marginTop: 4 }}>
+                Auto-trade enabled · Synced with website
+              </Text>
+            </LinearGradient>
+          ) : (
+            <View style={styles.noActive}>
+              <Ionicons name="bookmark-outline" size={20} color={colors.text.disabled} />
+              <Text style={{ color: colors.text.secondary, fontSize: 12, marginLeft: 8 }}>
+                No active symbols yet — Add from below ↓
+              </Text>
             </View>
-          ) : null
+          )
         }
         ListEmptyComponent={
           bundle ? (
@@ -369,20 +401,35 @@ function InstCard({ inst, onSaved }: { inst: Inst; onSaved: () => void }) {
   );
 }
 
-function UserSymRow({ sym }: { sym: any }) {
-  const isCall = (sym.optionType || '').toUpperCase() === 'CE';
+function UserSymRow({ sym, onDelete }: { sym: any; onDelete?: () => void }) {
+  // Server returns: { symbol_name, option_type, lot_size, strike_price, expiry, raw_data: {...} }
+  const name = sym.symbol_name || sym.name || sym.tradingSymbol || 'Unknown';
+  const optType = (sym.option_type || sym.optionType || (sym.raw_data?.optionType) || '').toUpperCase();
+  const isCall = optType === 'CE';
   const color = isCall ? '#00FF66' : '#FF3344';
+  const qty = sym.quantity || sym.lot_size || (sym.raw_data?.quantity) || 0;
+  const target = sym.targetAmount || (sym.raw_data?.targetAmount) || (sym.raw_data?.raw_data?.targetAmount) || 0;
+  const sl = sym.stopLossAmount || (sym.raw_data?.stopLossAmount) || (sym.raw_data?.raw_data?.stopLossAmount) || 0;
+  const trail = sym.trailingEnabled || (sym.raw_data?.trailingEnabled) || false;
+
   return (
     <View style={[styles.userRow, { borderLeftColor: color }]}>
       <View style={{ flex: 1 }}>
-        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{sym.name || sym.tradingSymbol}</Text>
-        <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>
-          Qty {sym.quantity} • T ₹{sym.targetAmount} • SL ₹{sym.stopLossAmount}{sym.trailingEnabled ? ' • Trail ON' : ''}
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
+          {name}
+        </Text>
+        <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, marginTop: 2 }}>
+          Qty {qty} • T ₹{target} • SL ₹{sl}{trail ? ' • Trail' : ''}
         </Text>
       </View>
-      <View style={{ backgroundColor: color + '22', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 }}>
-        <Text style={{ color, fontSize: 10, fontWeight: '800' }}>{isCall ? 'CALL' : 'PUT'}</Text>
+      <View style={{ backgroundColor: color + '33', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, marginRight: 6 }}>
+        <Text style={{ color, fontSize: 10, fontWeight: '900' }}>{isCall ? 'CALL' : 'PUT'}</Text>
       </View>
+      {onDelete ? (
+        <TouchableOpacity onPress={onDelete} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 14, backgroundColor: 'rgba(255,51,68,0.12)' }}>
+          <Ionicons name="trash-outline" size={14} color="#FF3344" />
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -521,14 +568,30 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   userRow: {
-    backgroundColor: colors.bg.secondary,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     padding: spacing.sm + 2,
     borderRadius: radius.sm,
     marginBottom: 6,
     flexDirection: 'row',
     alignItems: 'center',
     borderLeftWidth: 3,
+  },
+  activeBlock: {
+    padding: spacing.base,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#00FF6655',
+    marginBottom: spacing.lg,
+  },
+  noActive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.bg.secondary,
+    padding: spacing.base,
+    borderRadius: radius.md,
+    marginBottom: spacing.base,
     borderWidth: 1,
     borderColor: colors.border.default,
+    borderStyle: 'dashed',
   },
 });

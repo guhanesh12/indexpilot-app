@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Linking,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -60,16 +61,18 @@ export default function HomeTab() {
   const [countdown, setCountdown] = useState(timeToNextCandle(15));
   const [addFundsOpen, setAddFundsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [showTfPicker, setShowTfPicker] = useState(false);
   const isOpen = marketOpen();
 
   const engineRunning = Boolean(
     engineState?.running ||
     engineState?.isRunning ||
-    engineState?.state === 'running' ||
+    engineState?.state?.running ||
+    engineState?.state?.isRunning ||
     engineState?.data?.running ||
     engineState?.engineRunning
   );
-  const engineInterval = engineState?.interval || engineState?.candleInterval || engineState?.data?.interval || '15';
+  const engineInterval = engineState?.interval || engineState?.candleInterval || engineState?.state?.interval || engineState?.state?.candleInterval || engineState?.data?.interval || '15';
 
   // Countdown ticker
   useEffect(() => {
@@ -108,7 +111,9 @@ export default function HomeTab() {
     if (e.status === 'fulfilled') setEngineState(e.value);
     if (f.status === 'fulfilled') {
       const v: any = f.value;
-      setFundLimits(v?.data || v);
+      // /fund-limits returns { success, funds: { availableBalance, sodLimit, ... } }
+      const funds = v?.funds || v?.data || v;
+      setFundLimits(funds);
     }
   }, []);
 
@@ -157,7 +162,8 @@ export default function HomeTab() {
     ]);
   };
 
-  const startEngine = async () => {
+  const startEngine = async (interval: '5' | '15' | '30' = '15') => {
+    setShowTfPicker(false);
     try {
       // Fetch active symbols from server
       const r: any = await api.getSymbols();
@@ -167,9 +173,13 @@ export default function HomeTab() {
         Alert.alert('No symbols', 'Add at least one trading symbol from the Symbols tab before starting the engine.');
         return;
       }
-      await api.startEngine('15', active);
+      const res: any = await api.startEngine(interval, active);
+      if (res?.success === false) {
+        Alert.alert('Engine error', res?.error || res?.message || 'Failed to start engine');
+        return;
+      }
       await loadAll();
-      Alert.alert('Engine started', `Auto-trading every 15m candle close. ${active.length} symbol(s) active.`);
+      Alert.alert('🚀 Engine Started', `Auto-trading every ${interval}m candle close.\n${active.length} symbol(s) active.\n\nThis stays in sync with website — engine state is shared.`);
     } catch (e: any) {
       Alert.alert('Engine error', e.message + '\n\nTip: Make sure broker is connected first.');
     }
@@ -299,7 +309,7 @@ export default function HomeTab() {
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                onPress={startEngine}
+                onPress={() => setShowTfPicker(true)}
                 style={styles.startBtn}
                 testID="engine-start-button"
               >
@@ -393,6 +403,41 @@ export default function HomeTab() {
         visible={historyOpen}
         onClose={() => setHistoryOpen(false)}
       />
+
+      {/* Timeframe picker for engine start */}
+      <Modal visible={showTfPicker} animationType="fade" transparent onRequestClose={() => setShowTfPicker(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setShowTfPicker(false)} style={styles.tfBackdrop}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.tfSheet}>
+            <View style={{ alignItems: 'center', paddingBottom: 16 }}>
+              <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', marginBottom: 12 }} />
+              <Text style={{ color: '#fff', fontSize: 18, fontWeight: '900' }}>Select Timeframe</Text>
+              <Text style={{ color: colors.text.secondary, fontSize: 12, marginTop: 4 }}>Engine will scan every candle close</Text>
+            </View>
+            {[
+              { v: '5' as const, label: '5 Minutes', desc: 'High frequency · 75 trades/day max', color: '#FF4DD2' },
+              { v: '15' as const, label: '15 Minutes', desc: 'Balanced · 25 trades/day max · ⚡ Recommended', color: '#7C5CFF' },
+              { v: '30' as const, label: '30 Minutes', desc: 'Conservative · 12 trades/day max', color: '#00B4FF' },
+            ].map((tf) => (
+              <TouchableOpacity
+                key={tf.v}
+                onPress={() => startEngine(tf.v)}
+                style={[styles.tfOpt, { borderColor: tf.color + '88' }]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>{tf.label}</Text>
+                  <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>{tf.desc}</Text>
+                </View>
+                <View style={[styles.tfBadge, { backgroundColor: tf.color }]}>
+                  <Text style={{ color: '#000', fontWeight: '900', fontSize: 13 }}>{tf.v}M</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => setShowTfPicker(false)} style={styles.tfCancel}>
+              <Text style={{ color: colors.text.secondary, fontWeight: '700' }}>Cancel</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -568,4 +613,37 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,180,255,0.25)',
   },
   fundLabel: { color: '#00B4FF', fontSize: 10, fontWeight: '800', letterSpacing: 1.5 },
+  tfBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  tfSheet: {
+    backgroundColor: '#0A0820',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 30,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(124,92,255,0.3)',
+  },
+  tfOpt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F0F1A',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1.5,
+  },
+  tfBadge: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  tfCancel: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
 });

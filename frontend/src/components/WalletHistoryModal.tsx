@@ -121,12 +121,17 @@ function Stat({ label, value, color, rupee = true }: { label: string; value: num
 }
 
 function TxnRow({ tx }: { tx: Txn }) {
-  const isCredit = (tx.type || '').toLowerCase().includes('credit') || (tx.type || '').toLowerCase().includes('recharge') || Number(tx.amount) > 0;
+  const typeStr = String(tx.type || '').toLowerCase();
+  // Explicit type wins. Only positive amount fallback if no type given.
+  const isCredit = typeStr === 'credit' || typeStr.includes('recharge') || typeStr.includes('deposit') || typeStr === 'add'
+    || (!typeStr && Number(tx.amount) > 0);
+  const isDebit = typeStr === 'debit' || typeStr.includes('withdraw') || typeStr.includes('fee') || typeStr === 'deduct';
+  const credit = isCredit && !isDebit;
   const amount = Math.abs(Number(tx.amount || 0));
   const status = (tx.status || 'success').toLowerCase();
-  const icon = isCredit ? 'arrow-down-circle' : 'arrow-up-circle';
-  const color = isCredit ? '#00FF66' : '#FF7A00';
-  const date = tx.createdAt || tx.created_at;
+  const icon = credit ? 'arrow-down-circle' : 'arrow-up-circle';
+  const color = credit ? '#00FF66' : '#FF7A00';
+  const date = tx.createdAt || tx.created_at || (tx as any).timestamp;
   const dateStr = date ? new Date(date).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
   const statusColor = status === 'success' || status === 'completed' || status === 'paid' ? '#00FF66' : status === 'pending' ? '#FFB800' : '#FF3344';
 
@@ -136,17 +141,17 @@ function TxnRow({ tx }: { tx: Txn }) {
         <Ionicons name={icon as any} size={20} color={color} />
       </View>
       <View style={{ flex: 1, marginLeft: 12 }}>
-        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>
-          {tx.description || tx.reason || (isCredit ? 'Wallet Recharge' : 'Trade Debit')}
+        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }} numberOfLines={2}>
+          {tx.description || tx.reason || (credit ? 'Wallet Recharge' : 'Trade Debit')}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 8 }}>
           <Text style={{ color: colors.text.secondary, fontSize: 11 }}>{dateStr}</Text>
           <View style={{ width: 3, height: 3, borderRadius: 2, backgroundColor: colors.text.disabled }} />
-          <Text style={{ color: statusColor, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }}>{status}</Text>
+          <Text style={{ color: statusColor, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' }}>{credit ? 'CREDIT' : 'DEBIT'}</Text>
         </View>
       </View>
       <Text style={{ color, fontWeight: '900', fontSize: 15, fontVariant: ['tabular-nums'] }}>
-        {isCredit ? '+' : '−'}₹{amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+        {credit ? '+' : '−'}₹{amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
       </Text>
     </View>
   );

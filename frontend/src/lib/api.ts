@@ -120,6 +120,7 @@ export const api = {
   getApiCredentials: () => request('GET', '/api-credentials'),
   saveApiCredentials: (dhanClientId: string, dhanAccessToken: string) =>
     request('POST', '/api-credentials', { dhanClientId, dhanAccessToken }),
+  testApiConnection: () => request('POST', '/test-api-connection', {}),
   testConnection: () => request('POST', '/check-vps-connectivity', {}),
   getFundLimits: () => request('GET', '/fund-limits'),
 

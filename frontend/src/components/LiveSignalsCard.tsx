@@ -1,162 +1,240 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../lib/api';
 import { colors, spacing, radius } from '../lib/theme';
 
+const INDICES = ['NIFTY', 'BANKNIFTY', 'SENSEX'] as const;
+type IndexName = typeof INDICES[number];
+
 type Signal = {
-  id?: string;
-  symbol?: string;
-  index?: string;
-  signalType?: string;
-  side?: string;
-  action?: string;
-  price?: number;
-  ltp?: number;
+  index: IndexName;
+  signal: string; // BUY_CALL | BUY_PUT | WAIT
+  confidence: number; // 0..100
+  interval: string;
+  timestamp: string;
   reason?: string;
-  confidence?: number;
-  timestamp?: string;
-  createdAt?: string;
-  created_at?: string;
-  type?: string;
-  message?: string;
+  marketState?: string;
+  confirmations?: string;
+  sentiment?: 'Bullish' | 'Bearish' | 'Neutral';
+  loading?: boolean;
+  error?: string;
 };
 
-function parseLogs(raw: any): Signal[] {
-  const list = raw?.logs || raw?.data || raw?.entries || raw?.items || (Array.isArray(raw) ? raw : []);
-  if (!Array.isArray(list)) return [];
-  return list
-    .filter((l: any) => {
-      const t = String(l.type || l.category || l.level || '').toLowerCase();
-      const m = String(l.message || l.text || '').toLowerCase();
-      return (
-        t.includes('signal') ||
-        t.includes('trade') ||
-        t.includes('order') ||
-        t.includes('buy') ||
-        t.includes('sell') ||
-        m.includes('signal') ||
-        m.includes('buy') ||
-        m.includes('sell') ||
-        m.includes('ce') ||
-        m.includes('pe')
-      );
-    })
-    .slice(0, 20);
+function parseSignalResponse(idx: IndexName, raw: any): Signal {
+  // Backend response shape varies; normalize.
+  const data = raw?.data || raw?.signal || raw;
+  const sig = String(
+    data?.signal || data?.action || data?.recommendation ||
+    raw?.signal || raw?.action || ''
+  ).toUpperCase().replace(/\s+/g, '_');
+  let signal = 'WAIT';
+  if (sig.includes('CALL') || sig.includes('BUY_CE') || sig === 'BUY') signal = 'BUY_CALL';
+  else if (sig.includes('PUT') || sig.includes('BUY_PE') || sig === 'SELL') signal = 'BUY_PUT';
+  else if (sig.includes('WAIT') || sig.includes('HOLD') || sig.includes('NO')) signal = 'WAIT';
+
+  let confidence = Number(data?.confidence ?? raw?.confidence ?? 0);
+  if (confidence > 0 && confidence <= 1) confidence = confidence * 100;
+
+  const reason = String(data?.reason || data?.analysis || data?.message || raw?.reason || '');
+  const marketState = String(data?.marketState || data?.market || data?.trend || raw?.marketState || '').toUpperCase();
+  const confirmations = String(data?.confirmations || data?.confirmCount || raw?.confirmations || '');
+
+  let sentiment: 'Bullish' | 'Bearish' | 'Neutral' = 'Neutral';
+  if (signal === 'BUY_CALL') sentiment = 'Bullish';
+  else if (signal === 'BUY_PUT') sentiment = 'Bearish';
+
+  return {
+    index: idx,
+    signal,
+    confidence,
+    interval: String(data?.interval || raw?.interval || '15M'),
+    timestamp: String(data?.timestamp || data?.time || raw?.timestamp || new Date().toISOString()),
+    reason,
+    marketState,
+    confirmations,
+    sentiment,
+  };
 }
 
 export default function LiveSignalsCard() {
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(false);
+  const [interval, setIntervalSel] = useState<'5' | '15' | '30'>('15');
+  const [signals, setSignals] = useState<Record<IndexName, Signal | null>>({
+    NIFTY: null, BANKNIFTY: null, SENSEX: null,
+  });
+  const [loading, setLoading] = useState<Record<IndexName, boolean>>({ NIFTY: true, BANKNIFTY: true, SENSEX: true });
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 
-  const load = useCallback(async () => {
+  const loadOne = useCallback(async (idx: IndexName, ivl: string) => {
+    setLoading((p) => ({ ...p, [idx]: true }));
     try {
-      const r: any = await api.getLogs();
-      const filtered = parseLogs(r);
-      setSignals(filtered);
-      setUpdatedAt(new Date());
-    } catch {} finally {
-      setLoading(false);
+      const r: any = await api.getAISignal({ index: idx, interval: ivl });
+      if (r && !r.error) {
+        const s = parseSignalResponse(idx, r);
+        setSignals((p) => ({ ...p, [idx]: s }));
+      } else {
+        setSignals((p) => ({
+          ...p,
+          [idx]: {
+            index: idx, signal: 'WAIT', confidence: 0, interval: ivl + 'M',
+            timestamp: new Date().toISOString(),
+            error: r?.error || 'No data',
+            sentiment: 'Neutral',
+          },
+        }));
+      }
+    } catch (e: any) {
+      setSignals((p) => ({
+        ...p,
+        [idx]: {
+          index: idx, signal: 'WAIT', confidence: 0, interval: ivl + 'M',
+          timestamp: new Date().toISOString(),
+          error: e.message || 'Network error',
+          sentiment: 'Neutral',
+        },
+      }));
+    } finally {
+      setLoading((p) => ({ ...p, [idx]: false }));
     }
   }, []);
 
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 10000); // refresh every 10s
-    return () => clearInterval(t);
-  }, [load]);
+  const loadAll = useCallback(async (ivl: string) => {
+    await Promise.all(INDICES.map((i) => loadOne(i, ivl)));
+    setUpdatedAt(new Date());
+  }, [loadOne]);
 
-  const visible = expanded ? signals : signals.slice(0, 3);
+  useEffect(() => {
+    loadAll(interval);
+    const t = setInterval(() => loadAll(interval), 30000);
+    return () => clearInterval(t);
+  }, [interval, loadAll]);
 
   return (
     <LinearGradient colors={['#0F0A2E', '#0A0820']} style={styles.card}>
+      {/* Header */}
       <View style={styles.head}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-          <View style={styles.pulse} />
-          <Text style={styles.title}>📡 LIVE SIGNALS</Text>
-          {signals.length ? (
-            <View style={styles.countPill}>
-              <Text style={styles.countText}>{signals.length}</Text>
-            </View>
-          ) : null}
+          <Ionicons name="trending-up" size={16} color="#7C5CFF" />
+          <Text style={styles.title}>Multi-Symbol AI Signals</Text>
         </View>
-        {updatedAt ? (
-          <Text style={{ color: colors.text.disabled, fontSize: 10 }}>
-            ↻ {Math.floor((Date.now() - updatedAt.getTime()) / 1000)}s
-          </Text>
-        ) : null}
+        {/* Timeframe pills */}
+        <View style={styles.ivlRow}>
+          {(['5', '15', '30'] as const).map((v) => (
+            <TouchableOpacity
+              key={v}
+              onPress={() => setIntervalSel(v)}
+              style={[styles.ivlBtn, interval === v && styles.ivlBtnActive]}
+            >
+              <Text style={{ color: interval === v ? '#fff' : colors.text.secondary, fontSize: 11, fontWeight: '800' }}>
+                {v}M
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
-      {loading && !signals.length ? (
-        <View style={{ paddingVertical: 24, alignItems: 'center' }}>
-          <ActivityIndicator color="#7C5CFF" />
-          <Text style={{ color: colors.text.disabled, marginTop: 8, fontSize: 11 }}>Listening to engine…</Text>
-        </View>
-      ) : signals.length === 0 ? (
-        <View style={styles.empty}>
-          <Ionicons name="radio-outline" size={32} color={colors.text.disabled} />
-          <Text style={{ color: colors.text.secondary, fontSize: 12, marginTop: 8, textAlign: 'center' }}>
-            Waiting for next candle close...
-          </Text>
-          <Text style={{ color: colors.text.disabled, fontSize: 10, marginTop: 4, textAlign: 'center' }}>
-            Engine pushes signals every 5/15-min interval
-          </Text>
-        </View>
-      ) : (
-        <>
-          {visible.map((s, i) => <SignalRow key={s.id || i} sig={s} />)}
-          {signals.length > 3 ? (
-            <TouchableOpacity onPress={() => setExpanded(!expanded)} style={styles.expandBtn}>
-              <Text style={{ color: '#7C5CFF', fontSize: 12, fontWeight: '700' }}>
-                {expanded ? 'Show less' : `Show all ${signals.length} signals`}
-              </Text>
-              <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color="#7C5CFF" />
-            </TouchableOpacity>
-          ) : null}
-        </>
-      )}
+      {/* 3-card row */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+        {INDICES.map((idx) => (
+          <SignalIndexCard
+            key={idx}
+            idx={idx}
+            sig={signals[idx]}
+            loading={loading[idx]}
+            interval={interval}
+          />
+        ))}
+      </ScrollView>
+
+      {updatedAt ? (
+        <Text style={{ color: colors.text.disabled, fontSize: 10, textAlign: 'center', marginTop: 10 }}>
+          ↻ Last update: {updatedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · Auto-refresh 30s
+        </Text>
+      ) : null}
+
+      <View style={styles.howItWorks}>
+        <Text style={{ color: '#7C5CFF', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 6 }}>
+          ⚡ HOW IT WORKS
+        </Text>
+        <Text style={styles.bullet}>• System analyzes all 3 indices independently</Text>
+        <Text style={styles.bullet}>• Each index gets its own AI signal (BUY_CALL, BUY_PUT, or WAIT)</Text>
+        <Text style={styles.bullet}>• ⚡ ONLY ONE order placed per candle (highest confidence)</Text>
+      </View>
     </LinearGradient>
   );
 }
 
-function SignalRow({ sig }: { sig: Signal }) {
-  const text = String(sig.message || sig.reason || '').toLowerCase();
-  const isBuy = (sig.side || sig.action || sig.signalType || '').toLowerCase().includes('buy') || text.includes('buy') || text.includes(' ce ');
-  const isSell = (sig.side || sig.action || sig.signalType || '').toLowerCase().includes('sell') || text.includes('sell') || text.includes(' pe ');
-  const color = isBuy ? '#00FF66' : isSell ? '#FF3344' : '#FFB800';
-  const ts = sig.timestamp || sig.createdAt || sig.created_at;
-  const timeStr = ts ? new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
-  const symbol = sig.symbol || sig.index || (sig.message ? String(sig.message).split(' ')[0] : '—');
-  const message = String(sig.message || sig.reason || `${sig.action || sig.side || 'Signal'} ${sig.symbol || ''}`);
+function SignalIndexCard({ idx, sig, loading, interval }: { idx: IndexName; sig: Signal | null; loading: boolean; interval: string }) {
+  const isCall = sig?.signal === 'BUY_CALL';
+  const isPut = sig?.signal === 'BUY_PUT';
+  const isWait = !sig || sig.signal === 'WAIT';
+  const accent = isCall ? '#00FF66' : isPut ? '#FF3344' : '#FFB800';
+  const bgGrad: [string, string] = isCall
+    ? ['#053D2C', '#001F12']
+    : isPut
+    ? ['#3D0511', '#1F0008']
+    : ['#1F1A0A', '#0F0A05'];
+  const sentLabel = isCall ? 'Bullish' : isPut ? 'Bearish' : 'Neutral';
+
+  const ts = sig?.timestamp ? new Date(sig.timestamp) : null;
+  const tsStr = ts ? ts.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
 
   return (
-    <View style={[styles.row, { borderLeftColor: color }]}>
-      <View style={[styles.dot, { backgroundColor: color }]} />
-      <View style={{ flex: 1 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }} numberOfLines={1}>
-            {symbol}
-          </Text>
-          <View style={{ backgroundColor: color + '22', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 3 }}>
-            <Text style={{ color, fontSize: 9, fontWeight: '900' }}>
-              {isBuy ? 'BUY' : isSell ? 'SELL' : 'INFO'}
-            </Text>
-          </View>
-          {timeStr ? <Text style={{ color: colors.text.disabled, fontSize: 10, marginLeft: 'auto' }}>{timeStr}</Text> : null}
+    <LinearGradient
+      colors={bgGrad}
+      style={[styles.idxCard, { borderColor: accent + '88' }]}
+    >
+      <Text style={styles.idxName}>{idx}</Text>
+
+      {loading && !sig ? (
+        <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+          <ActivityIndicator color={accent} />
+          <Text style={{ color: colors.text.disabled, fontSize: 10, marginTop: 6 }}>Analyzing…</Text>
         </View>
-        <Text numberOfLines={2} style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2, lineHeight: 15 }}>
-          {message.length > 100 ? message.slice(0, 100) + '…' : message}
-        </Text>
-        {sig.price || sig.ltp ? (
-          <Text style={{ color: '#7C5CFF', fontSize: 10, marginTop: 3, fontWeight: '700' }}>
-            @ ₹{sig.price || sig.ltp}{sig.confidence ? ` · ${Math.round((sig.confidence || 0) * 100)}% conf` : ''}
+      ) : sig?.error ? (
+        <>
+          <Text style={[styles.signalBig, { color: '#FFB800' }]}>WAIT</Text>
+          <Text style={{ color: colors.text.disabled, fontSize: 10, marginTop: 8 }}>
+            {String(sig.error).slice(0, 60)}
           </Text>
-        ) : null}
-      </View>
-    </View>
+          <Text style={{ color: colors.text.disabled, fontSize: 9, marginTop: 4 }}>
+            {interval}M · {tsStr}
+          </Text>
+        </>
+      ) : sig ? (
+        <>
+          <Text style={[styles.signalBig, { color: accent }]}>{sig.signal}</Text>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12, marginTop: 6 }}>
+            Confidence: <Text style={{ color: '#fff', fontWeight: '900' }}>{Math.round(sig.confidence)}%</Text>
+          </Text>
+          {/* Confidence bar */}
+          <View style={styles.confBarBg}>
+            <View style={[styles.confBarFill, { width: `${Math.min(100, Math.max(0, sig.confidence))}%`, backgroundColor: accent }]} />
+          </View>
+
+          <Text style={{ color: colors.text.disabled, fontSize: 10, marginTop: 8 }}>
+            {sig.interval} • {tsStr}
+          </Text>
+
+          {sig.reason ? (
+            <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, marginTop: 8, lineHeight: 15 }} numberOfLines={3}>
+              {sig.reason.length > 90 ? sig.reason.slice(0, 90) + '…' : sig.reason}
+            </Text>
+          ) : null}
+
+          {sig.marketState ? (
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginTop: 6 }}>
+              Market: <Text style={{ color: '#fff' }}>{sig.marketState}</Text>
+            </Text>
+          ) : null}
+
+          <View style={[styles.sentBadge, { backgroundColor: accent + '33', borderColor: accent }]}>
+            <Text style={{ color: accent, fontSize: 11, fontWeight: '900' }}>{sentLabel}</Text>
+          </View>
+        </>
+      ) : null}
+    </LinearGradient>
   );
 }
 
@@ -169,28 +247,36 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124,92,255,0.3)',
   },
   head: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  title: { color: '#fff', fontSize: 12, fontWeight: '900', letterSpacing: 1 },
-  pulse: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF3344' },
-  countPill: {
-    backgroundColor: 'rgba(255,77,210,0.2)',
-    paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8,
-    borderWidth: 1, borderColor: 'rgba(255,77,210,0.4)',
+  title: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  ivlRow: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: 2 },
+  ivlBtn: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
+  ivlBtnActive: { backgroundColor: '#7C5CFF' },
+  idxCard: {
+    width: 220,
+    padding: 14,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    minHeight: 220,
   },
-  countText: { color: '#FF4DD2', fontSize: 10, fontWeight: '900' },
-  empty: { paddingVertical: 28, alignItems: 'center' },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderLeftWidth: 3,
-    borderRadius: 6,
-    padding: 10,
-    marginBottom: 6,
-    gap: 10,
+  idxName: { color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '800', letterSpacing: 1.5 },
+  signalBig: {
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+    marginTop: 8,
   },
-  dot: { width: 6, height: 6, borderRadius: 3, marginTop: 6 },
-  expandBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 8, gap: 4, marginTop: 4,
+  confBarBg: {
+    height: 4, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 2, marginTop: 6, overflow: 'hidden',
   },
+  confBarFill: { height: 4, borderRadius: 2 },
+  sentBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 4, borderWidth: 1, marginTop: 10,
+  },
+  howItWorks: {
+    marginTop: 14, paddingTop: 12,
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  bullet: { color: 'rgba(255,255,255,0.6)', fontSize: 11, marginVertical: 1 },
 });
