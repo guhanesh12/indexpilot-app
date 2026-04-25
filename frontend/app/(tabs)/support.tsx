@@ -6,8 +6,17 @@ import { Card, Heading, Body, Button, Input, Chip } from '../../src/components/P
 import { colors, spacing, radius, typography } from '../../src/lib/theme';
 import { api } from '../../src/lib/api';
 
-const CATS = ['general', 'billing', 'broker_request', 'technical'] as const;
-const PRIORITIES = ['low', 'medium', 'high'] as const;
+const CATS = ['general', 'billing', 'broker_request', 'technical'];
+const PRIORITIES = ['low', 'medium', 'high'];
+
+const statusStyle = (s: string) => {
+  const S = (s || '').toLowerCase();
+  if (S === 'open' || S === 'pending') return { bg: 'rgba(255,184,0,0.15)', fg: '#FFB800', label: 'PENDING' };
+  if (S === 'replied' || S === 'in_progress' || S === 'in-progress')
+    return { bg: 'rgba(0,180,255,0.15)', fg: '#00B4FF', label: 'REPLIED' };
+  if (S === 'resolved' || S === 'closed') return { bg: 'rgba(0,255,102,0.15)', fg: '#00FF66', label: 'RESOLVED' };
+  return { bg: 'rgba(255,255,255,0.06)', fg: colors.text.secondary, label: (s || 'UNKNOWN').toUpperCase() };
+};
 
 export default function SupportTab() {
   const [tickets, setTickets] = useState<any[]>([]);
@@ -18,7 +27,8 @@ export default function SupportTab() {
   const load = useCallback(async () => {
     try {
       const res: any = await api.getTickets();
-      setTickets(res?.tickets || []);
+      const list = res?.tickets || res?.data || [];
+      setTickets(Array.isArray(list) ? list : []);
     } catch {
       setTickets([]);
     } finally {
@@ -29,12 +39,19 @@ export default function SupportTab() {
 
   useEffect(() => {
     load();
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
   }, [load]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Heading variant="h3">Support</Heading>
+        <View>
+          <Heading variant="h3">Support Tickets</Heading>
+          <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>
+            {tickets.length} tickets · auto-refresh
+          </Text>
+        </View>
         <TouchableOpacity testID="new-ticket-button" onPress={() => setModal(true)} style={styles.newBtn}>
           <Ionicons name="add" size={18} color="#050505" />
           <Text style={{ color: '#050505', fontWeight: '700', fontSize: 13 }}>New</Text>
@@ -43,15 +60,13 @@ export default function SupportTab() {
 
       <FlatList
         data={tickets}
-        keyExtractor={(i) => i.id}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#fff" />
-        }
+        keyExtractor={(i, idx) => i.id || i.ticketId || String(idx)}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#fff" />}
         contentContainerStyle={{ padding: spacing.base, paddingBottom: 80 }}
         ListEmptyComponent={
           loading ? null : (
             <Card>
-              <Body style={{ textAlign: 'center' }}>No tickets yet</Body>
+              <Body style={{ textAlign: 'center' }}>No tickets yet. Tap "New" to create one.</Body>
             </Card>
           )
         }
@@ -64,28 +79,45 @@ export default function SupportTab() {
 }
 
 function TicketRow({ ticket }: { ticket: any }) {
-  const statusColor = ticket.status === 'open' ? colors.trading.profit : colors.text.secondary;
+  const st = statusStyle(ticket.status);
+  const tid = ticket.id || ticket.ticketId || ticket.ticket_id || '';
+  const shortId = tid ? `#${String(tid).slice(-8).toUpperCase()}` : '';
+  const created = ticket.createdAt || ticket.created_at;
+  const dateStr = created ? new Date(created).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
   return (
-    <Card style={{ marginBottom: spacing.sm }} testID="support-ticket-row">
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ color: colors.text.primary, fontWeight: '700', flex: 1 }} numberOfLines={1}>
-          {ticket.subject}
-        </Text>
-        <View style={{ backgroundColor: colors.bg.tertiary, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 }}>
-          <Text style={{ color: statusColor, fontSize: 10, fontWeight: '700' }}>{String(ticket.status).toUpperCase()}</Text>
+    <View style={[styles.ticketCard, { borderLeftColor: st.fg }]} testID="support-ticket-row">
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <View style={{ flex: 1, marginRight: spacing.sm }}>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }} numberOfLines={1}>
+            {ticket.subject}
+          </Text>
+          {shortId ? (
+            <Text style={{ color: colors.text.disabled, fontSize: 10, marginTop: 2, fontVariant: ['tabular-nums'] }}>
+              {shortId}
+            </Text>
+          ) : null}
+        </View>
+        <View style={[styles.statusPill, { backgroundColor: st.bg }]}>
+          <Text style={{ color: st.fg, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 }}>{st.label}</Text>
         </View>
       </View>
-      <Text style={{ color: colors.text.secondary, fontSize: 12, marginTop: 6 }} numberOfLines={2}>
+      <Text style={{ color: colors.text.secondary, fontSize: 12, marginTop: 8, lineHeight: 16 }} numberOfLines={2}>
         {ticket.message}
       </Text>
-      <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
-        <Text style={styles.meta}>{ticket.category}</Text>
-        <Text style={styles.meta}>· {ticket.priority}</Text>
-        <Text style={[styles.meta, { marginLeft: 'auto' }]}>
-          {ticket.createdAt ? new Date(ticket.createdAt).toLocaleDateString() : ''}
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' }}>
+        <Text style={[styles.metaPill, { backgroundColor: 'rgba(124,92,255,0.15)', color: '#7C5CFF' }]}>
+          {ticket.category || 'general'}
+        </Text>
+        {ticket.priority ? (
+          <Text style={[styles.metaPill, { backgroundColor: 'rgba(255,184,0,0.15)', color: '#FFB800' }]}>
+            {ticket.priority}
+          </Text>
+        ) : null}
+        <Text style={{ marginLeft: 'auto', color: colors.text.disabled, fontSize: 10 }}>
+          {dateStr}
         </Text>
       </View>
-    </Card>
+    </View>
   );
 }
 
@@ -163,7 +195,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
-  meta: { color: colors.text.disabled, fontSize: 11 },
+  ticketCard: {
+    backgroundColor: colors.bg.secondary,
+    borderRadius: radius.md,
+    padding: spacing.base,
+    marginBottom: spacing.sm,
+    borderLeftWidth: 3,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+  },
+  statusPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 4 },
+  metaPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    fontSize: 10,
+    fontWeight: '700',
+    overflow: 'hidden',
+  },
   label: { color: colors.text.secondary, fontSize: 10, fontWeight: '700', letterSpacing: 1.5 },
   modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalBody: {

@@ -2,43 +2,44 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, RefreshControl, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Heading, Body, Chip } from '../../src/components/Primitives';
+import { Heading, Body } from '../../src/components/Primitives';
 import { colors, spacing, radius } from '../../src/lib/theme';
 import { api } from '../../src/lib/api';
 
-const TYPES = ['ALL', 'SIGNAL', 'ORDER', 'INFO', 'ERROR'];
+const TYPES = ['ALL', 'SIGNAL', 'ORDER', 'INFO', 'SUCCESS', 'ERROR', 'ENGINE_STOP'];
 
-const typeColor = (t: string) => {
-  switch ((t || '').toUpperCase()) {
-    case 'ERROR':
-      return colors.trading.loss;
-    case 'ORDER':
-      return colors.trading.warning;
-    case 'SIGNAL':
-      return colors.trading.profit;
-    default:
-      return colors.text.secondary;
-  }
+const typeStyle = (t: string) => {
+  const T = (t || '').toUpperCase();
+  if (T === 'ERROR') return { bg: 'rgba(255,51,68,0.12)', fg: colors.trading.loss };
+  if (T === 'ORDER') return { bg: 'rgba(255,184,0,0.15)', fg: colors.trading.warning };
+  if (T === 'SIGNAL' || T === 'SUCCESS') return { bg: 'rgba(0,255,102,0.12)', fg: colors.trading.profit };
+  if (T === 'ENGINE_STOP' || T === 'ENGINE_START') return { bg: 'rgba(0,180,255,0.12)', fg: '#00B4FF' };
+  return { bg: 'rgba(255,255,255,0.06)', fg: colors.text.secondary };
 };
 
 export default function LogsTab() {
   const [logs, setLogs] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState('ALL');
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
       const res: any = await api.getLogs();
-      setLogs(res?.logs || []);
+      const list = res?.logs || res?.data || [];
+      setLogs(Array.isArray(list) ? list : []);
     } catch {
       setLogs([]);
     } finally {
+      setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
     load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
   }, [load]);
 
   const clearAll = () => {
@@ -59,20 +60,46 @@ export default function LogsTab() {
     ]);
   };
 
-  const filtered = filter === 'ALL' ? logs : logs.filter((l) => (l.type || '').toUpperCase() === filter);
+  const filtered = filter === 'ALL'
+    ? logs
+    : logs.filter((l) => (l.type || l.action || '').toUpperCase().includes(filter));
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Heading variant="h3">Logs</Heading>
-        <TouchableOpacity testID="logs-clear-button" onPress={clearAll}>
-          <Ionicons name="trash-outline" size={20} color={colors.trading.loss} />
+        <View style={{ flex: 1 }}>
+          <Heading variant="h3">Advanced AI Logs</Heading>
+          <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }}>
+            {logs.length} entries · auto-refresh 5s
+          </Text>
+        </View>
+        <TouchableOpacity testID="logs-clear-button" onPress={clearAll} style={styles.clearBtn}>
+          <Ionicons name="trash-outline" size={14} color={colors.trading.loss} />
+          <Text style={{ color: colors.trading.loss, fontSize: 12, fontWeight: '700' }}>Clear</Text>
         </TouchableOpacity>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingHorizontal: spacing.base }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipRow}
+      >
         {TYPES.map((t) => (
-          <Chip key={t} label={t} active={filter === t} onPress={() => setFilter(t)} testID={`log-filter-${t.toLowerCase()}`} />
+          <TouchableOpacity
+            key={t}
+            onPress={() => setFilter(t)}
+            testID={`log-filter-${t.toLowerCase()}`}
+            style={[styles.chip, filter === t && styles.chipActive]}
+          >
+            <Text style={{
+              color: filter === t ? '#050505' : colors.text.primary,
+              fontSize: 11,
+              fontWeight: '700',
+              letterSpacing: 0.5,
+            }}>
+              {t}
+            </Text>
+          </TouchableOpacity>
         ))}
       </ScrollView>
 
@@ -84,8 +111,10 @@ export default function LogsTab() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor="#fff" />}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Ionicons name="terminal-outline" size={40} color={colors.text.disabled} />
-            <Body style={{ textAlign: 'center', marginTop: spacing.base }}>No logs yet. Signals and orders will appear here.</Body>
+            <Ionicons name={loading ? 'sync-outline' : 'terminal-outline'} size={40} color={colors.text.disabled} />
+            <Body style={{ textAlign: 'center', marginTop: spacing.base }}>
+              {loading ? 'Loading logs…' : 'No logs match this filter'}
+            </Body>
           </View>
         }
         renderItem={({ item }) => <LogRow item={item} />}
@@ -95,42 +124,73 @@ export default function LogsTab() {
 }
 
 function LogRow({ item }: { item: any }) {
-  const col = typeColor(item.type);
-  const time = item.timestamp ? new Date(item.timestamp).toLocaleTimeString('en-GB') : '';
+  const t = item.type || item.action || 'INFO';
+  const style = typeStyle(t);
+  const time = item.timestamp || item.createdAt || item.created_at;
+  let timeStr = '';
+  if (time) {
+    try {
+      timeStr = new Date(typeof time === 'number' ? time : time).toLocaleTimeString('en-GB');
+    } catch {
+      timeStr = '';
+    }
+  }
   return (
     <View style={styles.logRow} testID="log-entry">
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <View style={[styles.typeBadge, { borderColor: col }]}>
-          <Text style={{ color: col, fontSize: 9, fontWeight: '700', letterSpacing: 1 }}>{(item.type || 'INFO').toUpperCase()}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+        <Text style={{ color: colors.text.disabled, fontSize: 11, fontVariant: ['tabular-nums'], minWidth: 64 }}>
+          {timeStr}
+        </Text>
+        <View style={[styles.typeBadge, { backgroundColor: style.bg }]}>
+          <Text style={{ color: style.fg, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 }}>
+            {String(t).toUpperCase()}
+          </Text>
         </View>
-        <Text style={styles.time}>{time}</Text>
       </View>
-      <Text style={styles.msg}>{item.message}</Text>
-      {item.details ? (
-        <Text style={styles.details}>{JSON.stringify(item.details)}</Text>
-      ) : null}
+      <Text style={styles.msg}>{item.message || item.msg || JSON.stringify(item)}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg.primary },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.base },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.base,
+  },
+  clearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.trading.loss,
+    backgroundColor: 'rgba(255,51,68,0.08)',
+  },
+  chipRow: { paddingHorizontal: spacing.base, paddingBottom: 6, alignItems: 'center', gap: 6 },
+  chip: {
+    backgroundColor: colors.bg.secondary,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: colors.border.default,
+    alignSelf: 'center',
+  },
+  chipActive: { backgroundColor: colors.brand.primary, borderColor: colors.brand.primary },
   logRow: {
+    backgroundColor: colors.bg.secondary,
+    borderRadius: radius.sm,
+    padding: spacing.sm + 2,
+    marginBottom: 6,
     borderLeftWidth: 2,
     borderLeftColor: colors.border.default,
-    paddingLeft: spacing.base,
-    paddingVertical: 8,
-    marginBottom: 6,
   },
-  typeBadge: {
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 3,
-  },
-  time: { color: colors.text.disabled, fontSize: 10, fontVariant: ['tabular-nums'] },
-  msg: { color: colors.text.primary, fontSize: 12, marginTop: 6, lineHeight: 16 },
-  details: { color: colors.text.secondary, fontSize: 10, marginTop: 4, fontFamily: 'monospace' },
+  typeBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 3 },
+  msg: { color: colors.text.primary, fontSize: 12, lineHeight: 16 },
   empty: { alignItems: 'center', padding: spacing.xl, marginTop: spacing.xl },
 });

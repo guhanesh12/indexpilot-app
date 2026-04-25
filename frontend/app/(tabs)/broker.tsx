@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, TouchableOpacity, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Card, Heading, Body, Button, Input } from '../../src/components/Primitives';
@@ -137,6 +137,7 @@ function StaticIPTab() {
   const [info, setInfo] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
+  const [copied, setCopied] = useState(false);
 
   const refresh = async () => {
     setFetching(true);
@@ -161,27 +162,62 @@ function StaticIPTab() {
   const daysLeft = info?.daysRemaining ?? info?.days_remaining;
   const addr = info?.address || info?.ipAddress || info?.ip || '';
 
-  const purchase = async () => {
-    setLoading(true);
+  const copy = async () => {
+    if (!addr) return;
     try {
-      const res: any = await api.createIPOrder();
-      Alert.alert('Order created', `Order ID: ${res?.orderId || res?.order?.id || 'n/a'}. Complete payment via Razorpay.`);
-    } catch (e: any) {
-      Alert.alert('Failed', e.message);
-    } finally {
-      setLoading(false);
+      const Clipboard = await import('@react-native-clipboard/clipboard');
+      Clipboard.default.setString(addr);
+    } catch {
+      try {
+        // web fallback
+        // @ts-ignore
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          // @ts-ignore
+          await navigator.clipboard.writeText(addr);
+        }
+      } catch {}
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const purchase = () => {
+    Alert.alert(
+      'Purchase Static IP',
+      'You will be redirected to indexpilotai.com to complete the ₹599 purchase securely.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: () => {
+            Linking.openURL('https://indexpilotai.com/login').catch(() => {
+              Alert.alert('Failed', 'Could not open browser');
+            });
+          },
+        },
+      ]
+    );
   };
 
   return (
     <View>
       <Card testID="static-ip-card">
         <Text style={styles.label}>YOUR DEDICATED IP</Text>
-        <Text style={{ ...(typography.metric as any), fontSize: 22, color: colors.text.primary, marginTop: 6 }}>
-          {fetching ? '…' : addr || 'Not assigned'}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 }}>
+          <Text style={{ ...(typography.metric as any), fontSize: 22, color: colors.text.primary, flex: 1 }}>
+            {fetching ? '…' : addr || 'Not assigned'}
+          </Text>
+          {hasActiveIP && addr ? (
+            <TouchableOpacity onPress={copy} testID="copy-ip-button" style={ipStyles.copyBtn}>
+              <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color={copied ? colors.trading.profit : colors.text.primary} />
+              <Text style={{ color: copied ? colors.trading.profit : colors.text.primary, fontSize: 12, fontWeight: '700' }}>
+                {copied ? 'Copied' : 'Copy'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
         {hasActiveIP ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 }}>
             <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.trading.profit }} />
             <Text style={{ color: colors.trading.profit, fontSize: 13, fontWeight: '700' }}>
               ACTIVE{daysLeft ? ` • ${daysLeft} days remaining` : ''}
@@ -197,20 +233,37 @@ function StaticIPTab() {
             Whitelist a dedicated IP with your broker for fast, reliable order execution.
           </Text>
           <Text style={{ color: colors.text.primary, marginTop: spacing.base, fontSize: 28, fontWeight: '800' }}>
-            ₹499<Text style={{ fontSize: 14, color: colors.text.secondary, fontWeight: '400' }}> / month</Text>
+            ₹599<Text style={{ fontSize: 14, color: colors.text.secondary, fontWeight: '400' }}> / month</Text>
           </Text>
           <Button
-            title="Purchase Static IP"
+            title="Purchase Static IP →"
             onPress={purchase}
             loading={loading}
             style={{ marginTop: spacing.base }}
             testID="purchase-static-ip-button"
           />
+          <Text style={{ color: colors.text.disabled, fontSize: 11, textAlign: 'center', marginTop: spacing.sm }}>
+            Secure payment via indexpilotai.com
+          </Text>
         </Card>
       )}
     </View>
   );
 }
+
+const ipStyles = StyleSheet.create({
+  copyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+});
 
 function RequestTab() {
   const [name, setName] = useState('');
