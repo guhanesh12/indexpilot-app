@@ -318,9 +318,10 @@ function InstCard({ inst, onSaved }: { inst: Inst; onSaved: () => void }) {
         targetAmount: parseFloat(target) || 0,
         stopLossAmount: parseFloat(sl) || 0,
         trailingEnabled: trail,
-        trailingActivateAt: trail ? parseFloat(trailActivate) || 0 : 0,
-        trailingTargetIncrement: trail ? parseFloat(trailTarget) || 0 : 0,
-        trailingSLDecrement: trail ? parseFloat(trailSL) || 0 : 0,
+        // Exact field names website expects (per IndexPilotAI sync docs):
+        trailingActivationAmount: trail ? parseFloat(trailActivate) || 0 : 0,
+        targetJumpAmount: trail ? parseFloat(trailTarget) || 0 : 0,
+        stopLossJumpAmount: trail ? parseFloat(trailSL) || 0 : 0,
         active: true,
         autoTrade: true,
       };

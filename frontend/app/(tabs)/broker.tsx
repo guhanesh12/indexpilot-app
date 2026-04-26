@@ -241,8 +241,8 @@ function StaticIPTab() {
   const copy = async () => {
     if (!addr) return;
     try {
-      const Clipboard = await import('@react-native-clipboard/clipboard');
-      Clipboard.default.setString(addr);
+      const Clipboard = await import('expo-clipboard');
+      await Clipboard.setStringAsync(addr);
     } catch {
       try {
         // web fallback
@@ -254,7 +254,8 @@ function StaticIPTab() {
       } catch {}
     }
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    Alert.alert('Copied! ✓', `IP address ${addr} copied to clipboard`, [{ text: 'OK' }]);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   const purchase = () => {

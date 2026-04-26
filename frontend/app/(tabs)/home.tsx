@@ -184,25 +184,20 @@ export default function HomeTab() {
   };
 
   const stopEngine = async () => {
-    Alert.alert('Stop Engine', 'Auto-trading will pause. Continue?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Stop',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.stopEngine();
-            // Save local intent for reliable UI state
-            await Storage.setEngineIntent(false);
-            setEngineIntent({ running: false, interval: engineInterval, ts: Date.now() });
-            await loadAll();
-            Alert.alert('Engine stopped', 'Auto-trading paused');
-          } catch (e: any) {
-            Alert.alert('Failed', e.message);
-          }
-        },
-      },
-    ]);
+    try {
+      // Optimistically update UI immediately
+      const intentObj = { running: false, interval: engineInterval, ts: Date.now() };
+      await Storage.setEngineIntent(false);
+      setEngineIntent(intentObj);
+      // Then stop on server (syncs with website)
+      await api.stopEngine();
+      await loadAll();
+      Alert.alert('🛑 Engine Stopped', 'Auto-trading paused.\nWebsite will reflect this within 5s.');
+    } catch (e: any) {
+      Alert.alert('Failed to stop', e.message);
+      // Revert intent if stop failed
+      await loadAll();
+    }
   };
 
   const startEngine = async (interval: '5' | '15' = '15') => {

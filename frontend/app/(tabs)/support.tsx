@@ -23,6 +23,7 @@ export default function SupportTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modal, setModal] = useState(false);
+  const [openTicket, setOpenTicket] = useState<any>(null);
 
   const load = useCallback(async () => {
     try {
@@ -70,22 +71,36 @@ export default function SupportTab() {
             </Card>
           )
         }
-        renderItem={({ item }) => <TicketRow ticket={item} />}
+        renderItem={({ item }) => (
+          <TicketRow
+            ticket={item}
+            onPress={() => {
+              setOpenTicket(item);
+              // Mark as read
+              const tid = item.id || item.ticketId || item.ticket_id;
+              if (tid) api.markTicketRead?.(String(tid)).catch(() => {});
+            }}
+          />
+        )}
       />
 
       <NewTicketModal visible={modal} onClose={() => setModal(false)} onCreated={() => { setModal(false); load(); }} />
+      <TicketDetailModal ticket={openTicket} onClose={() => setOpenTicket(null)} />
     </SafeAreaView>
   );
 }
 
-function TicketRow({ ticket }: { ticket: any }) {
+function TicketRow({ ticket, onPress }: { ticket: any; onPress: () => void }) {
   const st = statusStyle(ticket.status);
   const tid = ticket.id || ticket.ticketId || ticket.ticket_id || '';
   const shortId = tid ? `#${String(tid).slice(-8).toUpperCase()}` : '';
   const created = ticket.createdAt || ticket.created_at;
   const dateStr = created ? new Date(created).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const replies = ticket.replies || ticket.messages || [];
+  const replyCount = Array.isArray(replies) ? replies.length : 0;
+  const hasUnread = ticket.unreadReplies || ticket.unread_count || ticket.hasNewReply;
   return (
-    <View style={[styles.ticketCard, { borderLeftColor: st.fg }]} testID="support-ticket-row">
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7} style={[styles.ticketCard, { borderLeftColor: st.fg }]} testID="support-ticket-row">
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <View style={{ flex: 1, marginRight: spacing.sm }}>
           <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }} numberOfLines={1}>
@@ -117,7 +132,97 @@ function TicketRow({ ticket }: { ticket: any }) {
           {dateStr}
         </Text>
       </View>
-    </View>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Ionicons name="chatbubble-ellipses-outline" size={14} color={replyCount ? '#00B4FF' : colors.text.disabled} />
+          <Text style={{ color: replyCount ? '#00B4FF' : colors.text.disabled, fontSize: 11, fontWeight: '700' }}>
+            {replyCount > 0 ? `${replyCount} ${replyCount === 1 ? 'reply' : 'replies'}` : 'No replies yet'}
+          </Text>
+          {hasUnread ? (
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#FF4DD2', marginLeft: 4 }} />
+          ) : null}
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(124,92,255,0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}>
+          <Ionicons name="eye-outline" size={12} color="#7C5CFF" />
+          <Text style={{ color: '#7C5CFF', fontSize: 11, fontWeight: '800' }}>VIEW</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function TicketDetailModal({ ticket, onClose }: { ticket: any; onClose: () => void }) {
+  const visible = !!ticket;
+  if (!ticket) {
+    return <Modal visible={false} onRequestClose={onClose}><View /></Modal>;
+  }
+  const st = statusStyle(ticket.status);
+  const tid = ticket.id || ticket.ticketId || ticket.ticket_id || '';
+  const shortId = tid ? `#${String(tid).slice(-8).toUpperCase()}` : '';
+  const created = ticket.createdAt || ticket.created_at;
+  const dateStr = created ? new Date(created).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  const replies = ticket.replies || ticket.messages || [];
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: '#050505' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' }}>
+          <TouchableOpacity onPress={onClose} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' }}>
+            <Ionicons name="close" size={20} color="#fff" />
+          </TouchableOpacity>
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <Text style={{ color: '#fff', fontSize: 14, fontWeight: '800' }} numberOfLines={1}>{ticket.subject}</Text>
+            <Text style={{ color: colors.text.disabled, fontSize: 11, marginTop: 2 }}>{shortId} · {dateStr}</Text>
+          </View>
+          <View style={[styles.statusPill, { backgroundColor: st.bg }]}>
+            <Text style={{ color: st.fg, fontSize: 9, fontWeight: '800' }}>{st.label}</Text>
+          </View>
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }}>
+          {/* User original message */}
+          <View style={{ backgroundColor: 'rgba(124,92,255,0.10)', padding: 14, borderRadius: 10, borderLeftWidth: 3, borderLeftColor: '#7C5CFF' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <Ionicons name="person-circle" size={18} color="#7C5CFF" />
+              <Text style={{ color: '#7C5CFF', fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>YOU</Text>
+              <Text style={{ marginLeft: 'auto', color: colors.text.disabled, fontSize: 10 }}>{dateStr}</Text>
+            </View>
+            <Text style={{ color: '#fff', fontSize: 14, lineHeight: 21 }}>{ticket.message}</Text>
+          </View>
+
+          {/* Replies */}
+          {Array.isArray(replies) && replies.length > 0 ? (
+            replies.map((r: any, i: number) => {
+              const isAdmin = r.author === 'admin' || r.role === 'admin' || r.from === 'support' || r.isAdmin || r.user_role === 'admin';
+              const ts = r.createdAt || r.created_at || r.timestamp;
+              const tStr = ts ? new Date(ts).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '';
+              const accent = isAdmin ? '#00B4FF' : '#7C5CFF';
+              const bg = isAdmin ? 'rgba(0,180,255,0.10)' : 'rgba(124,92,255,0.10)';
+              return (
+                <View key={r.id || i} style={{ backgroundColor: bg, padding: 14, borderRadius: 10, borderLeftWidth: 3, borderLeftColor: accent, marginTop: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name={isAdmin ? 'headset' : 'person-circle'} size={18} color={accent} />
+                    <Text style={{ color: accent, fontSize: 11, fontWeight: '800', letterSpacing: 1 }}>
+                      {isAdmin ? 'SUPPORT TEAM' : 'YOU'}
+                    </Text>
+                    <Text style={{ marginLeft: 'auto', color: colors.text.disabled, fontSize: 10 }}>{tStr}</Text>
+                  </View>
+                  <Text style={{ color: '#fff', fontSize: 14, lineHeight: 21 }}>{r.message || r.text || r.body || r.content}</Text>
+                </View>
+              );
+            })
+          ) : (
+            <View style={{ alignItems: 'center', paddingVertical: 30, marginTop: 16 }}>
+              <Ionicons name="time-outline" size={36} color={colors.text.disabled} />
+              <Text style={{ color: colors.text.secondary, fontSize: 13, marginTop: 8, fontWeight: '600' }}>Awaiting Reply</Text>
+              <Text style={{ color: colors.text.disabled, fontSize: 11, marginTop: 4, textAlign: 'center' }}>
+                Our support team will get back to you within 24 hours.
+              </Text>
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
   );
 }
 

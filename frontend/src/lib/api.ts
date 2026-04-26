@@ -95,6 +95,8 @@ export const api = {
   // ─── POSITIONS ─────────────────────────────────
   getLivePositions: () => request('GET', '/live-positions'),
   getPositions: () => request('GET', '/positions'),
+  /** Active position monitor (per IndexPilotAI_PositionMonitor_API.md) */
+  getMonitorActive: () => request('GET', '/positions/monitor/active'),
 
   // ─── JOURNAL ───────────────────────────────────
   getJournal: (p?: any) => request('POST', '/get-journal-entries', p || { limit: 100 }),
@@ -110,6 +112,7 @@ export const api = {
   // ─── SUPPORT ───────────────────────────────────
   createTicket: (p: any) => request('POST', '/support/create', p),
   getTickets: () => request('GET', '/support/tickets'),
+  markTicketRead: (ticketId: string) => request('POST', `/support/mark-read/${ticketId}`, {}),
 
   // ─── LOGS ──────────────────────────────────────
   getLogs: () => request('GET', '/logs'),
