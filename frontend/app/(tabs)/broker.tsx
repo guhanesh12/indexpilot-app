@@ -140,13 +140,6 @@ function ConnectionTab() {
       setTesting(false);
     }
   };
-    } catch (e: any) {
-      Alert.alert('Error', e.message);
-    } finally {
-      setLoading(false);
-      setTesting(false);
-    }
-  };
 
   return (
     <View>
