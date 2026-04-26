@@ -114,6 +114,14 @@ export const api = {
   getTickets: () => request('GET', '/support/tickets'),
   markTicketRead: (ticketId: string) => request('POST', `/support/mark-read/${ticketId}`, {}),
 
+  // ─── PUSH NOTIFICATIONS (FCM/APNs) ─────────────
+  subscribePush: (token: string, platform: 'android' | 'ios') =>
+    request('POST', '/push/subscribe', { token, platform }),
+  getNotifications: () => request('GET', '/user/notifications'),
+  markNotificationRead: (id: string) => request('POST', `/user/notifications/${id}/read`, {}),
+  markAllNotificationsRead: () => request('POST', '/user/notifications/read-all', {}),
+  clearNotifications: () => request('DELETE', '/user/notifications'),
+
   // ─── LOGS ──────────────────────────────────────
   getLogs: () => request('GET', '/logs'),
   addLog: (p: any) => request('POST', '/logs', p),

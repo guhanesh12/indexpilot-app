@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Storage } from '../lib/storage';
+import { registerForPushNotifications } from '../lib/push';
 
 type User = { id: string; email: string; name?: string } | null;
 
@@ -44,6 +45,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const pin = await Storage.getPin();
     setHasPin(Boolean(pin));
     setPinUnlocked(false);
+    // Register for push notifications (no-op on web/Expo Go, fully works on EAS build)
+    registerForPushNotifications().catch(() => {});
   };
 
   const signOut = async () => {
