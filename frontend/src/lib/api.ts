@@ -120,6 +120,11 @@ export const api = {
   getApiCredentials: () => request('GET', '/api-credentials'),
   saveApiCredentials: (dhanClientId: string, dhanAccessToken: string) =>
     request('POST', '/api-credentials', { dhanClientId, dhanAccessToken }),
+  /** 2-step sync flow per docs: 1) save clientId only, 2) update token. Both app & website see status. */
+  saveDhanClientId: (dhanClientId: string) =>
+    request('POST', '/api-credentials', { dhanClientId }),
+  updateAccessToken: (dhanAccessToken: string) =>
+    request('POST', '/update-access-token', { dhanAccessToken }),
   testApiConnection: () => request('POST', '/test-api-connection', {}),
   testConnection: () => request('POST', '/check-vps-connectivity', {}),
   getFundLimits: () => request('GET', '/fund-limits'),

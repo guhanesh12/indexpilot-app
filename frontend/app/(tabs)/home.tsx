@@ -73,12 +73,13 @@ export default function HomeTab() {
   }, []);
 
   // Engine state — trust /engine/db-status's engine.isRunning (this is the SAME source the website uses).
-  // Local intent only used as instant feedback before the next status poll lands.
+  // BUT: when user just clicked Start/Stop, their intent wins for 30s to avoid UI flicker
+  // from cron-tick races where server briefly reports stale isRunning.
   const explicitRunning = engineState?.isRunning;
-  const intentFresh = engineIntent && (Date.now() - engineIntent.ts < 60 * 1000); // 1 min — short fallback only
-  const engineRunning = typeof explicitRunning === 'boolean'
-    ? explicitRunning
-    : (intentFresh ? engineIntent!.running : false);
+  const intentFresh = engineIntent && (Date.now() - engineIntent.ts < 30 * 1000); // 30 sec
+  const engineRunning = intentFresh
+    ? engineIntent!.running
+    : (explicitRunning === true);
   const engineInterval = engineState?.candleInterval || engineIntent?.interval || '15';
 
   // Countdown ticker

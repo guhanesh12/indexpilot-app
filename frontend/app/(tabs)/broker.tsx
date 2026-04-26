@@ -90,41 +90,55 @@ function ConnectionTab() {
     if (!clientId || !token) return Alert.alert('Missing', 'Enter both Client ID and Access Token');
     setLoading(true);
     try {
-      // Step 1: Save credentials to user's Supabase
-      const sav: any = await api.saveApiCredentials(clientId, token);
-      if (sav?.success === false) {
-        Alert.alert('Save failed', sav?.message || 'Could not save credentials');
-        return;
-      }
+      // Step 1: Save Client ID (one-time, syncs to website)
+      await api.saveDhanClientId(clientId);
 
-      // Step 2: VERIFY DIRECTLY WITH DHAN (bypasses user's Supabase proxy bugs)
+      // Step 2: Update Access Token (daily, syncs to website + verifies)
       setTesting(true);
+      const upd: any = await api.updateAccessToken(token);
+
+      // Step 3: Verify directly with Dhan API for live funds (bypasses Supabase token bug)
       const direct: any = await api.testDhanDirect(clientId, token);
 
-      if (direct?.connected === true && direct?.funds) {
+      const websiteSync = upd?.success === true;
+      const dhanLive = direct?.connected === true && direct?.funds;
+
+      if (dhanLive) {
         setConnected(true);
-        setStatusMsg('🟢 LIVE · Connected to Dhan');
+        setStatusMsg('🟢 LIVE · Synced with Website');
         setFund(direct.funds);
-        // Save credentials locally so dashboard can fetch live funds via direct Dhan API
         await Storage.setBrokerCreds(clientId, token);
         Alert.alert(
           '🎉 Connected Successfully',
-          `✓ Dhan API verified\n\n` +
+          `✓ Dhan API verified\n` +
+          `✓ Saved to website (${websiteSync ? 'synced' : 'pending'})\n\n` +
           `Available Balance: ₹${Number(direct.funds.availableBalance || 0).toLocaleString('en-IN')}\n` +
           `SOD Limit: ₹${Number(direct.funds.sodLimit || 0).toLocaleString('en-IN')}\n` +
           `Withdrawable: ₹${Number(direct.funds.withdrawableBalance || 0).toLocaleString('en-IN')}\n\n` +
-          `Credentials saved & ready for trading.`
+          `Login to website with the same credentials — broker will show as connected.`
         );
         return;
       }
 
-      // Direct test failed → token genuinely invalid
+      if (websiteSync) {
+        setConnected(true);
+        setStatusMsg('🟢 Saved & synced with website');
+        await Storage.setBrokerCreds(clientId, token);
+        Alert.alert(
+          '✅ Saved to Website',
+          `Credentials saved & website now shows broker as configured.\n\n` +
+          `Note: Dhan returned: ${upd?.message || 'token saved'}\n\n` +
+          `Funds may take 1-2 min to refresh.`
+        );
+        return;
+      }
+
       setConnected(false);
-      setStatusMsg('❌ Token invalid or expired');
+      setStatusMsg('❌ Token rejected by Dhan');
       Alert.alert(
         'Connection Failed',
         `Dhan rejected this Access Token.\n\n` +
-        `Reason: ${direct?.error || 'Unknown error'}\n\n` +
+        `Reason: ${direct?.error || upd?.message || 'Token invalid'}\n\n` +
         `How to fix:\n` +
         `1. Login to web.dhan.co\n` +
         `2. Go to Profile → DhanHQ Trading APIs\n` +

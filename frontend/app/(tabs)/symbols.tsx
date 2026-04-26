@@ -88,12 +88,15 @@ export default function SymbolsTab() {
 
   const filtered = useMemo(() => {
     if (!bundle) return [];
+    // Only show results when user types in search OR picks specific filter (not ALL/ALL)
+    const hasFilter = search.trim().length > 0 || idx !== 'ALL' || opt !== 'ALL';
+    if (!hasFilter) return [];
     let list: Inst[] = [];
     if (idx === 'ALL') list = [...bundle.NIFTY, ...bundle.BANKNIFTY, ...bundle.SENSEX];
     else list = (bundle as any)[idx] || [];
     if (opt !== 'ALL') list = list.filter((i) => i.optionType === opt);
-    if (search) {
-      const q = search.toLowerCase();
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
       list = list.filter(
         (i) => i.tradingSymbol.toLowerCase().includes(q) || String(i.strike).includes(q)
       );
@@ -280,6 +283,9 @@ function InstCard({ inst, onSaved }: { inst: Inst; onSaved: () => void }) {
   const [target, setTarget] = useState('3000');
   const [sl, setSl] = useState('2000');
   const [trail, setTrail] = useState(false);
+  const [trailActivate, setTrailActivate] = useState('100');
+  const [trailTarget, setTrailTarget] = useState('50');
+  const [trailSL, setTrailSL] = useState('50');
   const [saving, setSaving] = useState(false);
 
   const apiSymbol = `${inst.index}-${formatExpiry(inst.expiry)}-${inst.strike}-${inst.optionType}`;
@@ -312,6 +318,9 @@ function InstCard({ inst, onSaved }: { inst: Inst; onSaved: () => void }) {
         targetAmount: parseFloat(target) || 0,
         stopLossAmount: parseFloat(sl) || 0,
         trailingEnabled: trail,
+        trailingActivateAt: trail ? parseFloat(trailActivate) || 0 : 0,
+        trailingTargetIncrement: trail ? parseFloat(trailTarget) || 0 : 0,
+        trailingSLDecrement: trail ? parseFloat(trailSL) || 0 : 0,
         active: true,
         autoTrade: true,
       };
@@ -386,6 +395,38 @@ function InstCard({ inst, onSaved }: { inst: Inst; onSaved: () => void }) {
         </View>
         <Switch value={trail} onValueChange={setTrail} trackColor={{ true: '#7C5CFF', false: '#333' }} thumbColor="#fff" />
       </View>
+
+      {trail && (
+        <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.fieldLabel, { color: '#FFD700' }]}>💰 Activate @</Text>
+            <TextInput
+              keyboardType="number-pad"
+              value={trailActivate}
+              onChangeText={setTrailActivate}
+              style={[styles.inputField, { borderColor: '#FFD70066' }]}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.fieldLabel, { color: '#00FF66' }]}>📈 Target +</Text>
+            <TextInput
+              keyboardType="number-pad"
+              value={trailTarget}
+              onChangeText={setTrailTarget}
+              style={[styles.inputField, { borderColor: '#00FF6655' }]}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.fieldLabel, { color: '#FF7A00' }]}>🔻 SL −</Text>
+            <TextInput
+              keyboardType="number-pad"
+              value={trailSL}
+              onChangeText={setTrailSL}
+              style={[styles.inputField, { borderColor: '#FF7A0055' }]}
+            />
+          </View>
+        </View>
+      )}
 
       <TouchableOpacity onPress={save} disabled={saving} style={[styles.addBtn, { backgroundColor: accent }]}>
         {saving ? (
