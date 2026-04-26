@@ -249,6 +249,19 @@ export default function HomeTab() {
 
   const startEngine = async (interval: '5' | '15' = '15') => {
     setShowTfPicker(false);
+    // Minimum wallet balance check — engine cannot start below ₹89
+    const MIN_WALLET = 89;
+    if (wallet < MIN_WALLET) {
+      Alert.alert(
+        '💰 Insufficient Wallet Balance',
+        `Engine requires a minimum of ₹${MIN_WALLET} in your wallet to start.\n\nCurrent balance: ₹${wallet.toLocaleString('en-IN', { maximumFractionDigits: 2 })}\n\nTap "Add Funds" to recharge.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Add Funds', onPress: () => setAddFundsOpen(true) },
+        ]
+      );
+      return;
+    }
     try {
       // Fetch active symbols from server
       const r: any = await api.getSymbols();
@@ -399,13 +412,25 @@ export default function HomeTab() {
             ) : (
               <TouchableOpacity
                 onPress={() => setShowTfPicker(true)}
-                style={styles.startBtn}
+                style={[styles.startBtn, wallet < 89 && styles.startBtnDisabled]}
                 testID="engine-start-button"
               >
-                <Ionicons name="play" size={22} color="#050505" />
+                <Ionicons name="play" size={22} color={wallet < 89 ? '#666' : '#050505'} />
               </TouchableOpacity>
             )}
           </View>
+
+          {!engineRunning && wallet < 89 ? (
+            <View style={styles.lowBalanceBanner}>
+              <Ionicons name="warning" size={14} color="#FFB800" />
+              <Text style={{ color: '#FFB800', fontSize: 11, fontWeight: '700', flex: 1 }}>
+                Minimum ₹89 wallet balance required to start engine
+              </Text>
+              <TouchableOpacity onPress={() => setAddFundsOpen(true)} style={styles.miniAddBtn}>
+                <Text style={{ color: '#000', fontSize: 10, fontWeight: '900' }}>+ FUND</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           <View style={styles.engineMeta}>
             <View style={styles.engineMetaItem}>
@@ -724,6 +749,28 @@ const styles = StyleSheet.create({
     width: 52, height: 52, borderRadius: 26,
     backgroundColor: '#00FF66',
     alignItems: 'center', justifyContent: 'center',
+  },
+  startBtnDisabled: {
+    backgroundColor: '#2A2A35',
+    opacity: 0.6,
+  },
+  lowBalanceBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,184,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,184,0,0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 12,
+  },
+  miniAddBtn: {
+    backgroundColor: '#FFB800',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 4,
   },
   stopBtn: {
     width: 52, height: 52, borderRadius: 26,
