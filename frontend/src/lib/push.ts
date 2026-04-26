@@ -9,50 +9,48 @@
  *   • Wallet credit / debit
  *   • Support ticket reply
  *
- * IMPORTANT: Real push delivery only works in EAS Dev/Preview/Production builds
- * (or detached Expo build). In Expo Go preview, registration silently no-ops.
- *
- * Backend hook: POST /push/subscribe { token, platform }
- *   (per IndexPilotAI_ReactNative_Complete_API_Guide.md §4.14)
+ * IMPORTANT:
+ *   - Real push delivery only works in EAS Dev/Preview/Production builds.
+ *   - In Expo Go (SDK 53+), expo-notifications throws on import → we lazy-load
+ *     it ONLY when not in Expo Go to avoid crashing the bundle.
+ *   - Backend hook: POST /push/subscribe { token, platform }
  */
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { api } from './api';
 
-// Foreground notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }) as any,
-});
+const inExpoGo = Constants.appOwnership === 'expo';
+const canUsePush = Platform.OS !== 'web' && !inExpoGo;
 
 let registered = false;
 
 export async function registerForPushNotifications(): Promise<string | null> {
   if (registered) return null;
-
-  // Skip on web (no native push)
-  if (Platform.OS === 'web') return null;
-
-  // Only physical devices can receive push
-  if (!Device.isDevice) {
-    console.log('[Push] Skipped — emulator/simulator not supported by FCM/APNs');
-    return null;
-  }
-
-  // Skip in Expo Go (limited support after SDK 53)
-  const inExpoGo = Constants.appOwnership === 'expo';
-  if (inExpoGo) {
-    console.log('[Push] Skipped — Expo Go detected. Build with EAS for real push.');
+  if (!canUsePush) {
+    console.log('[Push] Skipped — Expo Go or web (no native FCM/APNs)');
     return null;
   }
 
   try {
+    // Lazy-load the modules inside the function so Expo Go never resolves them
+    const Notifications = await import('expo-notifications');
+    const Device = await import('expo-device');
+
+    // Foreground behavior (set once)
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }) as any,
+    });
+
+    if (!Device.isDevice) {
+      console.log('[Push] Skipped — emulator/simulator not supported');
+      return null;
+    }
+
     // Permissions
     const { status: existing } = await Notifications.getPermissionsAsync();
     let final = existing;
@@ -65,7 +63,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
       return null;
     }
 
-    // Android channel (required for Android 8+)
+    // Android channels (required for Android 8+)
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
         name: 'Trading Alerts',
@@ -92,7 +90,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
       });
     }
 
-    // FCM device token (Android) or APNs (iOS)
+    // Native FCM (Android) / APNs (iOS) device token
     let token: string | null = null;
     try {
       const dev = await Notifications.getDevicePushTokenAsync();
@@ -103,7 +101,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
 
     if (!token) return null;
 
-    // Send to backend
+    // Send token to backend so server can target this device
     try {
       await api.subscribePush(token, Platform.OS as 'android' | 'ios');
       console.log('[Push] Token registered with backend');
@@ -119,21 +117,31 @@ export async function registerForPushNotifications(): Promise<string | null> {
   }
 }
 
-/** Listener for foreground notifications. Returns cleanup. */
+/** Listener for foreground notifications. Returns cleanup. No-op in Expo Go/web. */
 export function attachForegroundListener(onReceive: (n: any) => void): () => void {
-  const sub = Notifications.addNotificationReceivedListener(onReceive);
-  return () => sub.remove();
+  if (!canUsePush) return () => {};
+  let subRef: any = null;
+  import('expo-notifications').then((Notifications) => {
+    subRef = Notifications.addNotificationReceivedListener(onReceive);
+  }).catch(() => {});
+  return () => { try { subRef?.remove(); } catch {} };
 }
 
-/** Listener for notification taps. */
+/** Listener for notification taps. No-op in Expo Go/web. */
 export function attachResponseListener(onTap: (r: any) => void): () => void {
-  const sub = Notifications.addNotificationResponseReceivedListener(onTap);
-  return () => sub.remove();
+  if (!canUsePush) return () => {};
+  let subRef: any = null;
+  import('expo-notifications').then((Notifications) => {
+    subRef = Notifications.addNotificationResponseReceivedListener(onTap);
+  }).catch(() => {});
+  return () => { try { subRef?.remove(); } catch {} };
 }
 
-/** Local notification (for testing / fallback when push unavailable). */
+/** Local notification (for testing / fallback). No-op in Expo Go/web. */
 export async function showLocalNotification(title: string, body: string, channel = 'default') {
+  if (!canUsePush) return;
   try {
+    const Notifications = await import('expo-notifications');
     await Notifications.scheduleNotificationAsync({
       content: { title, body, sound: true, badge: 1 },
       trigger: Platform.OS === 'android' ? ({ channelId: channel } as any) : null,

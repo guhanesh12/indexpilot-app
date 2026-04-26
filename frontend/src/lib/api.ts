@@ -167,7 +167,11 @@ export const api = {
   // ─── ENGINE ────────────────────────────────────
   startEngine: (interval: string, symbols: any[] = []) =>
     request('POST', '/engine/start', { candleInterval: interval, symbols }),
-  stopEngine: () => request('POST', '/engine/stop', {}),
+  /** Stop engine — sends explicit state-override body so cron worker truly halts on Supabase. */
+  stopEngine: () =>
+    request('POST', '/engine/stop', { isRunning: false, enabled: false, force: true }),
+  /** Force-overwrite engine state row (fallback when /engine/stop is ignored by the edge fn). */
+  setEngineState: (patch: any) => request('POST', '/engine/state', patch),
   getEngineState: () => request('POST', '/engine/state', {}),
   getEngineStatus: () => request('GET', '/engine/status'),
   getEngineDbStatus: () => request('GET', '/engine/db-status'),

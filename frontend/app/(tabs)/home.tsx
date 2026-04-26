@@ -65,6 +65,8 @@ export default function HomeTab() {
   const [showTfPicker, setShowTfPicker] = useState(false);
   const [engineIntent, setEngineIntent] = useState<{ running: boolean; interval: string; ts: number } | null>(null);
   const [latestSignals, setLatestSignals] = useState<any>(null);
+  const [monitorPositions, setMonitorPositions] = useState<any[]>([]);
+  const [monitorAvailable, setMonitorAvailable] = useState<boolean>(true);
   const isOpen = marketOpen();
 
   // Load saved engine intent on mount
@@ -92,13 +94,19 @@ export default function HomeTab() {
   }, [engineInterval]);
 
   const loadAll = useCallback(async () => {
-    const [w, p, s, e, f] = await Promise.allSettled([
+    const promises: Promise<any>[] = [
       api.getWalletBalance(),
       api.getLivePositions(),
       api.getWalletDailyStats(),
-      api.getEngineDbStatus(), // GET /engine/db-status — engine.isRunning (synced w/ website) + latestSignals
+      api.getEngineDbStatus(),
       api.getFundLimits(),
-    ]);
+    ];
+    // Only poll position monitor if endpoint exists on user's Supabase (avoids 404 spam)
+    if (monitorAvailable) {
+      promises.push(api.getMonitorActive());
+    }
+    const results = await Promise.allSettled(promises);
+    const [w, p, s, e, f, m] = results;
     if (w.status === 'fulfilled') {
       const v: any = w.value;
       const b = v?.balance ?? v?.data?.balance ?? v?.wallet?.balance ?? 0;
@@ -155,7 +163,19 @@ export default function HomeTab() {
         setFundLimits(null);
       }
     }
-  }, []);
+    if (m && m.status === 'fulfilled') {
+      const v: any = m.value;
+      // Position monitor returns { positions: [...] } or { data: [...] } per spec
+      const list = v?.positions ?? v?.data ?? v?.activePositions ?? v?.monitor ?? [];
+      setMonitorPositions(Array.isArray(list) ? list : []);
+    } else if (m && m.status === 'rejected') {
+      // Endpoint missing on user's Supabase deployment — stop polling to avoid 404 spam.
+      const msg = String((m as any).reason?.message || '').toLowerCase();
+      if (msg.includes('404') || msg.includes('not found') || msg.includes('failed (404)')) {
+        setMonitorAvailable(false);
+      }
+    }
+  }, [monitorAvailable]);
 
   // Skip market quotes — endpoint returns 500 currently
   const loadQuotes = useCallback(async () => {}, []);
@@ -189,13 +209,40 @@ export default function HomeTab() {
       const intentObj = { running: false, interval: engineInterval, ts: Date.now() };
       await Storage.setEngineIntent(false);
       setEngineIntent(intentObj);
-      // Then stop on server (syncs with website)
-      await api.stopEngine();
+
+      // Fire BOTH stop endpoints in parallel — defensive against the cron worker
+      // racing with /engine/stop's "isRunning=false" write. /engine/state directly
+      // patches the DB row that the cron reads on each tick.
+      const stopRes: any = await api.stopEngine().catch((e) => ({ error: e?.message }));
+      // Force-overwrite engine state to ensure cron sees isRunning=false on next tick.
+      await api.setEngineState({
+        isRunning: false,
+        enabled: false,
+        status: 'stopped',
+      }).catch(() => {});
+
+      // Verify after 1.5s — if Supabase still reports running, retry once more.
+      await new Promise((r) => setTimeout(r, 1500));
+      let verify: any = null;
+      try {
+        verify = await api.getEngineDbStatus();
+      } catch {}
+      const stillRunning = (verify?.engine?.isRunning ?? verify?.data?.engine?.isRunning) === true;
+      if (stillRunning) {
+        // Final retry
+        await api.setEngineState({ isRunning: false, enabled: false, status: 'stopped' }).catch(() => {});
+        await api.stopEngine().catch(() => {});
+      }
       await loadAll();
-      Alert.alert('🛑 Engine Stopped', 'Auto-trading paused.\nWebsite will reflect this within 5s.');
+
+      Alert.alert(
+        '🛑 Engine Stopped',
+        stillRunning
+          ? 'Stop signal sent twice — website will reflect within 10s.'
+          : 'Auto-trading paused.\nSynced with website ✓'
+      );
     } catch (e: any) {
-      Alert.alert('Failed to stop', e.message);
-      // Revert intent if stop failed
+      Alert.alert('Failed to stop', e.message || 'Could not stop engine');
       await loadAll();
     }
   };
@@ -428,6 +475,26 @@ export default function HomeTab() {
             )}
           </View>
         </View>
+
+        {/* Position Monitor (real-time AI exit signals — per IndexPilotAI_PositionMonitor_API.md) */}
+        {monitorPositions.length > 0 && (
+          <View style={{ marginTop: spacing.lg }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Animated.View style={[styles.marketDot, pulseStyle, { backgroundColor: '#7C5CFF' }]} />
+                <Text style={[styles.sectionTitle, { color: '#B49AFF' }]}>
+                  AI POSITION MONITOR ({monitorPositions.length})
+                </Text>
+              </View>
+              <Text style={{ color: colors.text.disabled, fontSize: 10 }}>live</Text>
+            </View>
+            <View testID="monitor-positions-list">
+              {monitorPositions.map((mp: any, idx: number) => (
+                <MonitorRow key={mp.positionId || mp.id || mp.symbol || idx} m={mp} />
+              ))}
+            </View>
+          </View>
+        )}
       </ScrollView>
 
       {/* Modals */}
@@ -541,6 +608,53 @@ function PositionRow({ p }: { p: any }) {
   );
 }
 
+function MonitorRow({ m }: { m: any }) {
+  // Monitor item shape (per IndexPilotAI_PositionMonitor_API.md):
+  // { positionId, symbol, action: 'HOLD'|'EXIT'|'TRAIL', signal, pnl, currentPrice,
+  //   entryPrice, quantity, target, stopLoss, trailingActive, lastChecked, reason }
+  const pnl = Number(m.pnl ?? m.profitLoss ?? 0);
+  const positive = pnl >= 0;
+  const action = String(m.action || m.signal || 'HOLD').toUpperCase();
+  const actionColor =
+    action === 'EXIT' || action === 'CLOSE' || action === 'SELL' ? '#FF3344'
+      : action === 'TRAIL' || action === 'TRAILING' ? '#FFB800'
+      : '#00FF66';
+  const ltp = Number(m.currentPrice ?? m.ltp ?? m.lastPrice ?? 0);
+  const entry = Number(m.entryPrice ?? m.avgPrice ?? 0);
+  const qty = Number(m.quantity ?? m.qty ?? 0);
+  const target = Number(m.target ?? m.targetAmount ?? 0);
+  const stopLoss = Number(m.stopLoss ?? m.stopLossAmount ?? 0);
+
+  return (
+    <View style={[styles.monitorRow, { borderLeftColor: actionColor }]}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
+            {m.symbol || m.tradingSymbol || m.name || 'Position'}
+          </Text>
+          <Text style={{ color: colors.text.secondary, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+            Qty {qty} • E ₹{entry || '—'}{ltp ? ` • L ₹${ltp}` : ''}
+            {target ? ` • T ₹${target}` : ''}{stopLoss ? ` • SL ₹${stopLoss}` : ''}
+          </Text>
+          {m.reason ? (
+            <Text style={{ color: '#B49AFF', fontSize: 10, marginTop: 3 }} numberOfLines={2}>
+              💡 {m.reason}
+            </Text>
+          ) : null}
+        </View>
+        <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
+          <View style={[styles.monitorBadge, { backgroundColor: actionColor + '22', borderColor: actionColor + '88' }]}>
+            <Text style={{ color: actionColor, fontWeight: '900', fontSize: 10, letterSpacing: 0.5 }}>{action}</Text>
+          </View>
+          <Text style={{ color: positive ? '#00FF66' : '#FF3344', fontWeight: '800', fontSize: 14, marginTop: 4 }}>
+            {positive ? '+' : ''}₹{Math.abs(pnl).toFixed(2)}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg.primary },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.base },
@@ -645,6 +759,21 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
     borderWidth: 1,
     borderColor: colors.border.default,
+  },
+  monitorRow: {
+    backgroundColor: 'rgba(124,92,255,0.08)',
+    padding: spacing.base,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
+    borderLeftWidth: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(124,92,255,0.25)',
+  },
+  monitorBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
   },
   fundCard: {
     marginTop: spacing.base,

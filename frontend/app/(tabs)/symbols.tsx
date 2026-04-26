@@ -303,20 +303,73 @@ function InstCard({ inst, onSaved }: { inst: Inst; onSaved: () => void }) {
         const r: any = await api.getSymbols();
         existing = r?.symbols || r?.data || [];
       } catch {}
+
+      // Normalize existing symbols: server returns snake_case at top level
+      // AND a `raw_data` blob containing the original camelCase payload.
+      // We MUST merge both layers, otherwise re-saving drops optionType/target/SL/trailing
+      // and corrupts previously-saved symbols (CE → UNKNOWN/PE bug).
+      const normalized = existing.map((s: any) => {
+        const r = s.raw_data || {};
+        // optionType resolution priority: top-level → snake → raw_data → derive from name
+        let optType =
+          s.optionType || s.option_type || r.optionType || r.option_type || '';
+        if (!optType) {
+          const n = (s.symbol_name || s.name || r.name || '').toUpperCase();
+          if (n.endsWith('-CE') || n.includes('-CE-')) optType = 'CE';
+          else if (n.endsWith('-PE') || n.includes('-PE-')) optType = 'PE';
+        }
+        optType = String(optType).toUpperCase();
+        const idx = s.index || r.index || (s.symbol_name || s.name || '').split('-')[0] || '';
+        const secId = s.securityId || s.symbol || r.securityId || r.symbol || '';
+        return {
+          id: s.id || s.symbol_id || r.id || `sym_${Math.random().toString(36).slice(2)}`,
+          symbol_id: s.symbol_id || s.id || r.symbol_id || r.id,
+          name: s.name || s.symbol_name || r.name || r.symbol_name || r.tradingSymbol || '',
+          symbol_name: s.symbol_name || s.name || r.symbol_name || r.name || r.tradingSymbol || '',
+          symbol: secId,
+          securityId: secId,
+          index: idx,
+          exchangeSegment: s.exchangeSegment || s.exchange_segment || r.exchangeSegment || r.exchange_segment || 'NSE_FNO',
+          exchange_segment: s.exchange_segment || s.exchangeSegment || r.exchange_segment || r.exchangeSegment || 'NSE_FNO',
+          tradingSymbol: s.tradingSymbol || r.tradingSymbol || s.symbol_name || s.name || '',
+          optionType: optType,
+          option_type: optType,
+          strike: s.strike || s.strike_price || r.strike || r.strike_price || 0,
+          strike_price: s.strike_price || s.strike || r.strike_price || r.strike || 0,
+          expiry: s.expiry || r.expiry || '',
+          quantity: s.quantity || s.lot_size || s.lot || r.quantity || r.lot_size || r.lot || 0,
+          lot: s.lot || s.lot_size || r.lot || r.lot_size || s.quantity || 1,
+          lot_size: s.lot_size || s.lot || r.lot_size || r.lot || s.quantity || 1,
+          targetAmount: s.targetAmount ?? s.target_amount ?? r.targetAmount ?? r.target_amount ?? 0,
+          stopLossAmount: s.stopLossAmount ?? s.stop_loss_amount ?? r.stopLossAmount ?? r.stop_loss_amount ?? 0,
+          trailingEnabled: s.trailingEnabled ?? s.trailing_enabled ?? r.trailingEnabled ?? r.trailing_enabled ?? false,
+          trailingActivationAmount: s.trailingActivationAmount ?? s.trailing_activation_amount ?? r.trailingActivationAmount ?? r.trailing_activation_amount ?? 0,
+          targetJumpAmount: s.targetJumpAmount ?? s.target_jump_amount ?? r.targetJumpAmount ?? r.target_jump_amount ?? 0,
+          stopLossJumpAmount: s.stopLossJumpAmount ?? s.stop_loss_jump_amount ?? r.stopLossJumpAmount ?? r.stop_loss_jump_amount ?? 0,
+          active: s.active ?? r.active ?? true,
+          autoTrade: s.autoTrade ?? s.auto_trade ?? r.autoTrade ?? r.auto_trade ?? true,
+        };
+      });
+
       const newSym = {
-        // Canonical fields (what website expects per IndexPilotAI sync docs):
         id: `sym_${Date.now()}`,
+        symbol_id: `sym_${Date.now()}`,
         name: apiSymbol,
+        symbol_name: apiSymbol,
         symbol: inst.securityId,
         index: inst.index,
         securityId: inst.securityId,
         exchangeSegment: inst.exchange,
+        exchange_segment: inst.exchange,
         tradingSymbol: inst.tradingSymbol,
         optionType: inst.optionType,
+        option_type: inst.optionType,
         strike: inst.strike,
+        strike_price: inst.strike,
         expiry: inst.expiry,
         quantity: qty,
         lot: inst.lot,
+        lot_size: inst.lot,
         targetAmount: parseFloat(target) || 0,
         stopLossAmount: parseFloat(sl) || 0,
         trailingEnabled: trail,
@@ -326,7 +379,15 @@ function InstCard({ inst, onSaved }: { inst: Inst; onSaved: () => void }) {
         active: true,
         autoTrade: true,
       };
-      const merged = [...existing.filter((x: any) => x.name !== apiSymbol), newSym];
+      // Dedup by name AND symbol_name AND securityId+optionType (cover all aliases)
+      const merged = [
+        ...normalized.filter((x: any) =>
+          x.name !== apiSymbol &&
+          x.symbol_name !== apiSymbol &&
+          !(x.securityId === inst.securityId && x.optionType === inst.optionType)
+        ),
+        newSym,
+      ];
       await api.saveSymbols(merged);
       Alert.alert('Added', `${apiSymbol} saved to trading list`);
       onSaved();
